@@ -17,12 +17,14 @@ Use this skill when the task is about the Event Capture backend in this reposito
    - `references/domain-rules.md` for event, auth, upload, gallery, moderation, and privacy invariants.
    - `references/code-map.md` for the fastest path to the relevant files.
 5. Keep changes aligned with the current inline/local implementation unless the user explicitly asks to move the code toward the planned R2/Redis/worker target.
-6. Validate with `cd backend && ./gradlew test` after meaningful backend changes. Run at least `./gradlew compileJava` if the task is too narrow for the full test suite.
+6. Write or update tests before changing backend runtime code. Prefer MockMvc integration tests when behavior spans controllers, security, persistence, or local storage.
+7. Validate with `cd backend && ./gradlew test` after meaningful backend changes. Run at least `./gradlew compileJava` if the task is too narrow for the full test suite.
 
 ## Project-Specific Rules
 
 - Treat `.codex/docs/BACKEND_IMPLEMENTATION_PLAN.md` as the target architecture, not the current implementation.
 - Treat `backend/` as the source of truth for what actually runs today.
+- Treat backend changes as incomplete until the relevant tests are in place and passing.
 - Preserve the distinction between:
   - Host auth: session-backed `ROLE_HOST` access.
   - Guest auth: event-scoped cookie session with no account.

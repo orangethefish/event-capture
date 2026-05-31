@@ -2,6 +2,8 @@
 
 - Treat `backend/` as the source of truth for the current implementation.
 - Treat `.codex/docs/BACKEND_IMPLEMENTATION_PLAN.md` as the target architecture, not the current runtime behavior.
+- Write or update tests before changing backend runtime code.
+- Prefer MockMvc integration tests when behavior spans controllers, security, persistence, or local storage. Use narrower unit tests only for isolated logic where integration coverage would be disproportionate.
 - Keep the distinction between host and guest access intact:
   - Hosts authenticate with session-backed `ROLE_HOST` access.
   - Guests use an event-scoped cookie session and do not have accounts.
@@ -16,4 +18,5 @@
   - retention not expired
 - Check auth and security routes carefully before editing them. There is a current CSRF route mismatch between controller and security config that should not be widened accidentally.
 - Use Context7 for library-specific changes involving Spring Boot, Spring Security, Spring Data JPA, Flyway, Redis, OAuth, or storage SDKs.
+- Treat a backend change as incomplete until the relevant tests are in place and passing.
 - Validate meaningful backend changes with `cd backend && ./gradlew test`. Use at least `./gradlew compileJava` for narrow changes when full tests are unnecessary.

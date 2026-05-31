@@ -50,6 +50,11 @@
   - guest upload
   - public gallery visibility
   - moderation
+- Unit tests for:
+  - event state rules and slug/share-path behavior
+  - magic-link request and consume lifecycle
+  - guest session create/resume/validation lifecycle
+  - in-memory rate limiter windows
 
 ## Temporary Substitutions vs Planned Architecture
 

@@ -36,7 +36,8 @@
 - In-process SSE broker for `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted`.
 - Upload validation for allowed content types and size limits.
 - Local filesystem-backed storage adapter for uploads and variants.
-- Integration tests covering host auth, event creation, guest upload, public gallery visibility, and moderation.
+- Unit tests covering `EventService`, `AuthService`, `GuestSessionService`, and `SimpleRateLimiter`.
+- Integration tests covering host auth/profile/logout, event create/get/update, export jobs, public event lookup, guest session resume, single-part uploads, multipart uploads, public gallery visibility, public asset fetch, and moderation.
 
 ### Intentionally Temporary
 
@@ -123,6 +124,12 @@
   - `cd backend && ./gradlew compileJava`
 - Start app locally:
   - `cd backend && ./gradlew bootRun`
+
+## Backend Workflow Rules
+
+- Write or update backend tests before changing runtime code.
+- Prefer MockMvc integration tests for behavior that crosses controller, security, persistence, or local storage boundaries. Use narrower unit tests only when the behavior is isolated enough that an integration test would add little value.
+- Treat a backend change as incomplete until the relevant tests exist and `cd backend && ./gradlew test` passes.
 
 ## Environment Notes
 

@@ -52,6 +52,11 @@
 
 - Main integration coverage:
   - `backend/src/test/java/com/eventcapture/backend/integration/BackendIntegrationTest.java`
+- Unit coverage:
+  - `backend/src/test/java/com/eventcapture/backend/event/EventServiceTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/auth/AuthServiceTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/guest/GuestSessionServiceTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/common/security/SimpleRateLimiterTest.java`
 - Test profile:
   - `backend/src/test/resources/application-test.yml`
 
