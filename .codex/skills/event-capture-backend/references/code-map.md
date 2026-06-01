@@ -5,7 +5,9 @@
 - App boot and config:
   - `backend/src/main/java/com/eventcapture/backend/EventCaptureBackendApplication.java`
   - `backend/src/main/java/com/eventcapture/backend/infra/config/AppProperties.java`
-  - `backend/src/main/java/com/eventcapture/backend/infra/config/SecurityConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/ApiSecurityConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/WorkerSecurityConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/SessionConfig.java`
   - `backend/src/main/resources/application.yml`
 - Error handling:
   - `backend/src/main/java/com/eventcapture/backend/common/error/ApiException.java`
@@ -25,10 +27,14 @@
   - `backend/src/main/java/com/eventcapture/backend/guest/GuestSessionService.java`
 - Uploads and media:
   - `backend/src/main/java/com/eventcapture/backend/media/UploadService.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/MediaProcessingService.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/NativeSourceImageDecoder.java`
   - `backend/src/main/java/com/eventcapture/backend/infra/storage/LocalStorageService.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/storage/R2ObjectStorageService.java`
 - Gallery and SSE:
   - `backend/src/main/java/com/eventcapture/backend/gallery/GalleryService.java`
   - `backend/src/main/java/com/eventcapture/backend/gallery/GalleryEventBroker.java`
+  - `backend/src/main/java/com/eventcapture/backend/gallery/GalleryEventRedisConfig.java`
 - Moderation:
   - `backend/src/main/java/com/eventcapture/backend/moderation/ModerationService.java`
 - Export:
@@ -52,11 +58,16 @@
 
 - Main integration coverage:
   - `backend/src/test/java/com/eventcapture/backend/integration/BackendIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/DistributedRuntimeIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/WorkerRoleIntegrationTest.java`
 - Unit coverage:
   - `backend/src/test/java/com/eventcapture/backend/event/EventServiceTest.java`
   - `backend/src/test/java/com/eventcapture/backend/auth/AuthServiceTest.java`
   - `backend/src/test/java/com/eventcapture/backend/guest/GuestSessionServiceTest.java`
   - `backend/src/test/java/com/eventcapture/backend/common/security/SimpleRateLimiterTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/gallery/GalleryEventBrokerTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/NativeSourceImageDecoderTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/gallery/PublicAssetUrlBuilderTest.java`
 - Test profile:
   - `backend/src/test/resources/application-test.yml`
 

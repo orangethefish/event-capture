@@ -11,6 +11,7 @@
 - `backend` is now a working Spring Boot 3.5.x Gradle project.
 - The frontend has not been scaffolded yet.
 - Root planning docs are in `.codex/docs/IMPLEMENTATION_PLAN.md` and `.codex/docs/BACKEND_IMPLEMENTATION_PLAN.md`.
+- `backend/` plus this `AGENTS.md` are the source of truth for what runs today. The planning docs remain target-state references.
 - Production-oriented environment variables are documented in `env.example`.
 
 ## Backend Status
@@ -66,16 +67,21 @@
   - expired export archive cleanup
   - expired upload-intent cleanup
 - Upload worker processing now creates gallery and thumbnail variants asynchronously, marks photos `READY` or `FAILED`, and emits `photo_ready` only after processing.
+- Upload-processing jobs now mark invalid/corrupt media `FAILED` without waiting through delayed retry backoff loops.
+- Upload worker decoding now uses native helper tools for HEIC/HEIF and WEBP when Java cannot decode the source directly, and public variants are always re-encoded instead of copying original bytes through unchanged.
 - Export jobs are now executed asynchronously and can return a signed or local download URL once `READY`.
 - Public feeds now build asset URLs from `APP_STORAGE_PUBLIC_BASE_URL` when configured; local storage continues to use backend asset endpoints.
 - Public asset reads and export reads stream through the storage abstraction instead of reading directly from the filesystem.
 - Unit tests covering `EventService`, `AuthService`, `GuestSessionService`, `SimpleRateLimiter`, `UploadService`, and `R2ObjectStorageService`.
 - Integration tests now run against PostgreSQL and Redis Testcontainers for the main backend behavior path, including Redis-backed host sessions, while keeping local storage for binary assets.
+- Split-runtime integration coverage now exercises separate `api` and `worker` boot paths against shared PostgreSQL and Redis, including worker-only job consumption, moderation state convergence, and maintenance cleanup.
+- `GalleryEventBrokerTest` now covers `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted` emitter payload delivery.
+- An opt-in live R2 smoke test now exercises direct upload, multipart completion, async processing, export generation, and retention cleanup when `EVENT_CAPTURE_LIVE_R2_SMOKE=true`.
 
 ### Intentionally Temporary
 
-- Media processing uses Java/ImageIO resizing and local re-encoding, with original-file copy fallback for unsupported formats.
-- EXIF stripping is only implicit for variants that are re-encoded; unsupported formats that fall back to copy are not stripped.
+- Media processing still relies on Java/ImageIO resizing after source decode, even when native helper tools are used to decode HEIC/HEIF or WEBP inputs.
+- EXIF stripping is still achieved through public-variant re-encoding rather than a dedicated metadata pipeline.
 - Public media is still served through backend asset endpoints unless `APP_STORAGE_PUBLIC_BASE_URL` is configured.
 - Cleanup scheduling is simple and currently relies on periodic scans plus idempotent job handlers rather than explicit deduplication state.
 - Session store still defaults to servlet session unless `APP_SESSION_STORE_TYPE=redis`.
@@ -116,7 +122,13 @@
   - `backend/src/main/resources/db/migration/V1__initial_schema.sql`
 - Tests:
   - `backend/src/test/java/com/eventcapture/backend/integration/BackendIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/DistributedRuntimeIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/WorkerRoleIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/LiveR2SmokeIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/gallery/GalleryEventBrokerTest.java`
   - `backend/src/test/java/com/eventcapture/backend/media/UploadServiceTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/NativeSourceImageDecoderTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/gallery/PublicAssetUrlBuilderTest.java`
   - `backend/src/test/java/com/eventcapture/backend/infra/storage/R2ObjectStorageServiceTest.java`
   - `backend/src/test/resources/application-test.yml`
 
@@ -188,7 +200,7 @@
 
 ## Environment Notes
 
-- The generated Gradle project is configured to use a Java 22 toolchain while compiling with `--release 21`, because the local machine had a working `javac 22` but an unusable Java 21 compiler path.
+- Local and dev builds now target a Java 21 toolchain directly, and the runtime images also remain on Java 21.
 - Default runtime DB is H2 for local startup unless `APP_DATASOURCE_*` overrides are set.
 - Integration tests use PostgreSQL and Redis Testcontainers via dynamic Spring properties, with Redis-backed Spring Session enabled in the test profile.
 - Storage provider defaults to `local`.
@@ -203,18 +215,19 @@
   - optional `APP_STORAGE_PUBLIC_BASE_URL`
 - R2 production variables are listed in `env.example`:
   - `APP_STORAGE_PROVIDER=r2`
-  - optional `APP_STORAGE_PUBLIC_BASE_URL`
+  - `APP_STORAGE_PUBLIC_BASE_URL` should be treated as required for production R2/CDN deployments
   - `APP_STORAGE_R2_BUCKET`
   - `APP_STORAGE_R2_ACCOUNT_ID`
   - optional `APP_STORAGE_R2_ENDPOINT`
   - `APP_STORAGE_R2_ACCESS_KEY`
   - `APP_STORAGE_R2_SECRET_KEY`
   - optional `APP_STORAGE_R2_PRESIGN_TTL`
+- The opt-in live R2 smoke test is enabled with `EVENT_CAPTURE_LIVE_R2_SMOKE=true` and reuses the existing `APP_STORAGE_*` R2 variables.
 
 ## Next Likely Work
 
-- Add native worker image tooling for HEIC reliability, explicit EXIF stripping, and higher-quality variant generation.
-- Add dedicated worker-role bootstrap coverage and multi-instance SSE verification on shared Redis.
-- Switch the Testcontainers suite to Redis-backed host sessions as well, then add coverage for session persistence/renewal.
-- Move production public-media delivery fully to a CDN/custom-domain path and stop relying on backend asset endpoints in deployed environments.
-- Add an opt-in live R2 smoke/integration test path once shared non-dev R2 credentials and a test bucket strategy exist.
+- Add a dedicated metadata pipeline if explicit EXIF inspection or stripping verification becomes a product or compliance requirement.
+- Decide whether production startup should hard-fail `APP_STORAGE_PROVIDER=r2` when `APP_STORAGE_PUBLIC_BASE_URL` is unset, instead of treating CDN use as a deployment convention.
+- Add Google OAuth end-to-end integration coverage alongside the existing magic-link and Redis-session coverage.
+- Add suspicious-flow abuse challenges such as Cloudflare Turnstile, which are still target-state only.
+- Surface Redis job dead-letter and retry behavior through operational metrics or alerts instead of logs alone.

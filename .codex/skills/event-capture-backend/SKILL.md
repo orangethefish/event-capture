@@ -31,6 +31,6 @@ Use this skill when the task is about the Event Capture backend in this reposito
 - Preserve the share-link model:
   - Host-facing `sharePath` is `/events/{slug}/{shareToken}`.
   - Public APIs live under `/api/v1/public/events/{slug}/{shareToken}/...`.
-- Do not assume direct browser-to-R2 uploads exist yet. Current upload binaries pass through backend `PUT` endpoints and land in local filesystem storage.
+- Presigned direct-to-R2 uploads exist when `APP_STORAGE_PROVIDER=r2`. Backend `PUT` binary routes remain only for `local` storage mode.
 - When changing gallery or asset behavior, preserve moderation, readiness, retention, and gallery-enabled checks together.
 - When changing auth/security routes, check `references/backend-state.md` for known route mismatches and conditional OAuth wiring.
