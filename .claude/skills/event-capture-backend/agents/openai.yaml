@@ -1,0 +1,4 @@
+interface:
+  display_name: "Event Capture Backend"
+  short_description: "Repo-specific Event Capture backend help"
+  default_prompt: "Use $event-capture-backend to implement or review backend work in the Event Capture Spring Boot repo."
