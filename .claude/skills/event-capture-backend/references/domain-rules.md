@@ -56,16 +56,18 @@
 - Upload intent TTL:
   - currently `20 minutes`
 - Current flow:
-  - `init` returns a presigned single-part upload for R2 or a local backend `PUT` URL
+  - `init` accepts an optional SHA-256 checksum and returns a presigned single-part upload plus its `requiredHeaders` for R2, or a local backend `PUT` URL
   - multipart R2 uploads request presigned part URLs and call `complete`; local mode retains backend multipart part `PUT` endpoints
-  - `finalize` verifies the stored object, creates a `Photo` in `UPLOADED` state, returns `202 Accepted`, and enqueues processing
+  - multipart part plans are contiguous and exact; `complete` and `finalize` are idempotent
+  - `finalize` verifies stored size, computes SHA-256, rejects and removes checksum mismatches, creates a `Photo` in `UPLOADED` state, returns `202 Accepted`, and enqueues processing
 - Worker processing behavior today:
-  - decodes the source with Java/ImageIO and native HEIC/HEIF or WEBP helpers when Java cannot decode it directly
-  - re-encodes gallery and thumbnail variants so original bytes and metadata are not copied into public assets
+  - verifies JPEG, PNG, WEBP, HEIC, and HEIF signatures against the declared MIME type before decoding
+  - validates encoded and decoded dimensions and pixel limits
+  - uses Java/ImageIO as the portable fallback and libvips in production for orientation normalization, resizing, metadata stripping, and public-variant re-encoding
   - records dimensions and marks the photo `READY`, or marks invalid/corrupt media `FAILED`
   - publishes SSE `photo_ready` only after processing succeeds
-- Known integrity gap:
-  - finalize checks object presence and size but does not yet validate file signatures, declared MIME consistency, or an end-to-end checksum
+- Current retry limitation:
+  - every `PROCESS_UPLOAD` failure is currently non-retryable; Phase 4 must classify invalid/corrupt media as permanent and retry transient storage, command, and dependency failures
 
 ## Photo and Gallery Rules
 
@@ -101,6 +103,7 @@
   - sets `deletedAt`
 - Export jobs run asynchronously and build archives through the storage abstraction.
 - Ready exports expose a signed R2 or local backend download URL until `archiveExpiresAt`; expired downloads return `410 Gone`.
+- The canonical download route is `GET /api/v1/host/events/{eventId}/exports/{exportId}/download`.
 - Guest-controlled client filenames are normalized to traversal-safe ZIP basenames; duplicate normalized names receive deterministic numeric suffixes.
 - Export job statuses:
   - `QUEUED`

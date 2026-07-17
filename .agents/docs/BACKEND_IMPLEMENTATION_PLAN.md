@@ -40,7 +40,7 @@
 - `hosts`: account record, primary email, display name, created and updated timestamps.
 - `host_identities`: host-to-auth-provider links for `magic_link` and `google`.
 - `magic_link_tokens`: hashed one-time tokens, email, host reference, expires-at, consumed-at, requester metadata.
-- `events`: host reference, title, slug, share-token hash, cover asset refs, theme config, scheduled upload open and close, manual override state, retention expiry, gallery enabled flag.
+- `events`: host reference, title, slug, share-token lookup hash, encrypted recoverable token, optional scheduled upload open time, mandatory close time, manual override state, closure/applied-retention snapshot, retention expiry, and gallery enabled flag. Theme and cover fields wait for design approval.
 - `guest_sessions`: event reference, display name, hashed session token, cookie id, expires-at, last-seen-at, lightweight risk metadata.
 - `upload_intents`: event reference, guest session reference, selected upload mode, storage key prefix, content type, size, multipart upload id if used, status, expires-at.
 - `photos`: event reference, guest session reference, original key, original filename, mime type, byte size, processing status, visibility state, deleted-at, failure reason, created and ready timestamps.
@@ -61,6 +61,7 @@
 
 - Use JPA entities for aggregates and standard CRUD.
 - Use targeted custom SQL or native queries for cursor-based photo feeds and admin gallery screens where JPA pagination becomes awkward.
+- Order host and public feeds by `(createdAt DESC, id DESC)` and use opaque, versioned compound keyset cursors.
 - Keep all schema changes as Flyway SQL migrations; do not rely on Hibernate schema auto-update.
 
 ## Storage and Media Pipeline
@@ -72,7 +73,7 @@
 - Variants: `variants/{eventId}/{photoId}/{randomToken}-{variantKind}.{ext}`
 - Exports: `exports/{eventId}/{exportId}.zip`
 - Originals and exports stay private.
-- Variants are served via a CDN or custom domain with opaque keys; do not derive them from event slugs.
+- Production variants remain private in R2 and are streamed through backend-authorized opaque asset routes so hide/delete/disable/expiry revocation cannot be bypassed. A CDN/custom-domain path remains disabled until it has an equivalent revocation-safe edge design.
 
 ### R2 integration details
 
@@ -80,7 +81,7 @@
 - Configure endpoint override to the account R2 endpoint.
 - Set region to `auto`.
 - Enable path-style access.
-- Disable chunked encoding to avoid R2 signature issues.
+- Keep R2 signing behavior inside the storage adapter. Presigned single and multipart PUT responses include all required signed headers, and AWS SDK checksum calculation remains `WHEN_REQUIRED` for compatibility.
 - Presign PUTs for direct uploads and presign export GETs for host downloads.
 
 ### Upload policy

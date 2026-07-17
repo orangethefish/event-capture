@@ -44,7 +44,7 @@
 - SSE broker with in-process delivery in explicit `local` mode and Redis pub/sub propagation in explicit `redis` mode
 - Upload init, presigned single-part and multipart R2 preparation, local-storage binary upload fallback, multipart completion, and finalize
 - Async worker-driven photo processing after finalize
-- Upload-processing failures now mark corrupt/invalid media `FAILED` without waiting through delayed retry backoff loops
+- All `PROCESS_UPLOAD` failures are currently non-retryable and mark the photo `FAILED`; Phase 4 must selectively retry transient storage, command, and dependency failures while keeping invalid/corrupt media permanent
 - Host moderation endpoints
 - Async export job creation, status lookup, signed/local download URLs, and expired-download enforcement
 - Flyway schema for all core domain tables
@@ -57,7 +57,7 @@
 - Startup tests for production/worker local-mode rejection, contradictory settings, and unavailable required Redis
 - Unit tests proving magic-link logs omit tokens/URLs and export ZIP names are traversal-safe
 - Broker unit tests for `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted` emitter delivery
-- Opt-in live R2 smoke coverage gated by `EVENT_CAPTURE_LIVE_R2_SMOKE=true`; the 2026-07-17 run with confirmed local configuration failed at the first presigned single-part `PUT` with HTTP `400`
+- Opt-in live R2 smoke coverage gated by `EVENT_CAPTURE_LIVE_R2_SMOKE=true`; the 2026-07-17 workflow passes direct single-part and multipart upload, asynchronous processing, export, incomplete-upload cleanup, and retention cleanup
 - Unit tests for:
   - event state rules and slug/share-path behavior
   - magic-link request and consume lifecycle
@@ -71,17 +71,23 @@
 
 - Local filesystem storage remains the default local/dev provider even though R2 support is implemented
 - Backend-served upload binary endpoints still exist for `local` storage mode even though presigned direct upload is implemented for `r2`
-- Media resizing still runs through Java/ImageIO after source decode, even when native helper tools are used to decode HEIC/HEIF or WEBP inputs
-- Public media still falls back to backend asset endpoints unless `APP_STORAGE_PUBLIC_BASE_URL` is configured
+- Production media processing uses libvips; Java/ImageIO remains the portable local/test fallback
+- Production media reads use backend-authorized asset endpoints for strict revocation; a public base URL remains available only outside production
 - Local mode uses an in-memory `MapSessionRepository` and process-local rate limits, SSE, and job dispatch; it is intentionally non-durable and single-process only
 - Cleanup scheduling relies on periodic scans plus idempotent handlers rather than explicit deduplication state
 
+## Active Completion Gaps
+
+- Events still persist the recoverable share token as plaintext in `share_token_value`; Phase 3 Release A adds encrypted dual-write/backfill support and deployment-gated Release B removes plaintext.
+- Event close times are nullable and lifecycle closure/retention snapshots are not persisted; existing null-close events require an operations-assigned close time before Release B.
+- Host and public feeds use timestamp-only cursors, so equal timestamps and concurrent inserts can create unstable traversal.
+- Job publication is after-commit rather than transactional; Redis backlog recovery, pending-message reclaim, and atomic delayed delivery remain incomplete.
+- Moderation transitions, strict asset cache headers, remaining-lifetime export presigns, and retention-purge multipart aborts remain Phase 6 work.
+
 ## Known Traps
 
-- Direct-to-R2 upload is not production-verified: the live smoke test currently receives HTTP `400` on the first presigned single-part `PUT`. The configured endpoint shape and generated URL domain/signed-header metadata passed non-secret validation, but the provider error body is not retained by the test.
+- Treat provider multipart upload IDs and ETags as opaque values: IDs persist as text, and ETags must be JSON-encoded rather than interpolated into request bodies.
 - `APP_INFRASTRUCTURE_MODE` is canonical. `APP_SESSION_STORE_TYPE` is only a legacy fallback, and conflicting values fail startup.
-- Upload finalize currently verifies object presence and size, but not media signatures, declared MIME consistency, or an end-to-end checksum.
-- Expired R2 multipart upload intents do not yet abort the underlying incomplete multipart upload.
 - Both CSRF bootstrap routes are valid today:
   - `AuthController` exposes `GET /api/v1/auth/csrf`
   - `CsrfController` exposes `GET /api/v1/csrf`

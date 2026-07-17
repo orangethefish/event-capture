@@ -14,7 +14,7 @@
 - Build a separate Angular app that talks to a Spring Boot JSON API.
 - Optimize the guest event page for mobile camera uploads and fast gallery browsing.
 - Make the first screen upload-first, with the live gallery directly below the primary upload controls.
-- Support host dashboard flows for multiple events per account, event creation and editing, live moderation, download and export, and retention and upload-window settings.
+- Support host dashboard flows for multiple events per account, event creation and editing, live moderation, download and export, and upload-window settings. Retention is a global operations-managed policy.
 
 ### Backend architecture
 
@@ -52,7 +52,7 @@
 
 - Give events scheduled upload open and close times plus manual host override.
 - Default to link-based privacy: anyone with the event link or QR can view and upload.
-- Keep the gallery hosted for 1 year by default, configurable per event in settings.
+- Require every new event to have a scheduled upload close time. Persist the global, effective-dated retention policy applied when uploads close; seed 365 days and do not expose a host override.
 - After uploads close, keep viewing available until retention expiry unless the host disables it.
 
 ## Public APIs and Interfaces
@@ -127,6 +127,6 @@
 - The first target is weddings, but the data model stays generic enough for other event types later.
 - v1 supports photos only, not video, comments, reactions, guest-original downloads, or collaborator hosts.
 - There is no separate marketing site requirement in v1 beyond minimal entry and sign-in pages.
-- The Angular frontend should use open-source font substitutes that preserve the editorial feel from `.agents/docs/DESIGN.md`.
+- Design artifacts, including typography, theme, and cover-photo contracts, remain pending product-owner approval; do not infer them from deleted drafts.
 - Use a dense masonry-style gallery for browsing, but keep upload controls visually dominant on the guest page.
 - Keep one Spring Boot repository and codebase for API and worker roles; do not split into separate services in v1.

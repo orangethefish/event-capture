@@ -55,8 +55,10 @@
   - `backend/src/main/java/com/eventcapture/backend/media/`
   - `backend/src/main/java/com/eventcapture/backend/moderation/`
   - `backend/src/main/java/com/eventcapture/backend/export/`
-- Migration:
+- Migrations:
   - `backend/src/main/resources/db/migration/V1__initial_schema.sql`
+  - `backend/src/main/resources/db/migration/V2__upload_media_integrity.sql`
+  - `backend/src/main/resources/db/migration/V3__widen_multipart_upload_id.sql`
 
 ## Tests
 
@@ -66,6 +68,8 @@
   - `backend/src/test/java/com/eventcapture/backend/integration/WorkerRoleIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/LocalRuntimeIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/RuntimeConfigurationIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/S3CompatibleStorageIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/LiveR2SmokeIntegrationTest.java`
 - Unit coverage:
   - `backend/src/test/java/com/eventcapture/backend/event/EventServiceTest.java`
   - `backend/src/test/java/com/eventcapture/backend/auth/AuthServiceTest.java`
@@ -73,6 +77,9 @@
   - `backend/src/test/java/com/eventcapture/backend/common/security/SimpleRateLimiterTest.java`
   - `backend/src/test/java/com/eventcapture/backend/gallery/GalleryEventBrokerTest.java`
   - `backend/src/test/java/com/eventcapture/backend/media/NativeSourceImageDecoderTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/MediaInspectionServiceTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/LibvipsMediaVariantProcessorTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/UploadServicePhase2Test.java`
   - `backend/src/test/java/com/eventcapture/backend/gallery/PublicAssetUrlBuilderTest.java`
 - Test profile:
   - `backend/src/test/resources/application-test.yml`
