@@ -8,6 +8,8 @@ From `backend/` run:
 - `./gradlew openApiCheck`
 - build both production images and smoke API-only and worker-only roles against PostgreSQL, Redis, and private R2
 
+From the repository root run `scripts/verify-guidance-mirrors.ps1` and `scripts/verify-secret-hygiene.ps1`. CI additionally runs Gitleaks, dependency reporting, the container build, and preserves the Bitbucket-to-GitHub mirror step.
+
 ## Outbox and worker recovery
 
 Jobs and gallery notifications are committed to `outbox_messages` with domain state. Monitor:
@@ -28,6 +30,16 @@ For an incident, inspect unpublished outbox age/count, Redis group/pending state
 ## PostgreSQL backup and restore drill
 
 Before schema enforcement releases, take a provider-native snapshot plus a logical backup. Quarterly, restore to an isolated database, run Flyway validation without applying unreviewed migrations, verify event/share-token counts and key IDs, boot an API/worker pair, and complete a create/join/upload/process/export journey. Record recovery time and data-loss window.
+
+## Phase 3 Release B control
+
+Release B is a maintenance-window, non-rolling migration. Before V6, freeze writes; stop every Release A API and worker; rerun `backend/scripts/phase3-release-b-preflight.sql` plus the application preflight with deployment-equivalent API and worker keyrings; and record zero counts, configured key IDs, application version, and the final backup identifier. Missing close times come only from authoritative operations data.
+
+Start one Release B worker to apply V6 under Flyway's lock. Verify migration and readiness before scaling workers or starting APIs. Before restoring traffic, smoke-test an existing link, host retrieval, public lookup, guest join, new event creation, and absence of `events.share_token_value`. Monitor decryption failures, host-event 5xx responses, readiness, and Flyway logs.
+
+Every stored key ID must remain configured on every node. Normal startup enforces this invariant. Backfill and preflight flags are mutually exclusive, and both are false during normal operation. The keyring is supplied by the deployment secret store; it must never be committed, printed, or captured with ciphertext/token values.
+
+If V6 or Release B fails after the column drop, stop the release and restore the identified pre-cutover database snapshot with the Release A binary and full old keyring. Do not create a down migration or reintroduce plaintext manually. The detailed checklist is in `.agents/docs/PHASE3_RELEASE.md`.
 
 ## R2 recovery expectations
 

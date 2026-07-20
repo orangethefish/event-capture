@@ -47,6 +47,11 @@
 - Host APIs for event list/create/get/update, host photo feed, moderation, export-job creation/status, and export download with expiry enforcement.
 - Public APIs for event lookup, guest session create/resume, gallery feed, SSE stream subscription, upload init, multipart part URL issuance, binary upload endpoints, multipart complete, finalize, and public asset fetch.
 - OpenAPI is exposed through Springdoc on the API role.
+- Phase 3 lifecycle behavior is implemented: mandatory close times for new events, closure-time retention snapshots, tri-state PATCH semantics, and compound opaque feed cursors.
+- Share tokens are persisted only as a SHA-256 lookup hash plus AES-256-GCM ciphertext and key ID. Host share paths decrypt the original token; public lookup remains hash-based and existing API paths/shapes are unchanged.
+- The optional Release B preflight scans events in bounded UUID-keyset batches and safely reports missing encryption data, unknown keys, decryption/hash failures, missing closes, and invalid windows. Backfill and preflight cannot run together.
+- Post-B backfill performs ciphertext-only key rotation, and normal startup rejects any database key ID absent from the configured API/worker keyring.
+- Flyway V6 enforces non-null close/ciphertext/key ID fields, nonblank encrypted fields, ordered upload windows, and physical removal of `share_token_value`. The code is ready for the coordinated non-rolling cutover; Phase 3 remains incomplete until that target deployment succeeds.
 - SSE fan-out uses local in-process delivery in explicit `local` infrastructure mode and Redis pub/sub propagation in explicit `redis` mode.
 - Upload validation for allowed content types and size limits.
 - Storage abstraction with:
@@ -84,7 +89,7 @@
 - Split-runtime integration coverage now exercises separate `api` and `worker` boot paths against shared PostgreSQL and Redis, including worker-only job consumption, moderation state convergence, and maintenance cleanup.
 - `GalleryEventBrokerTest` covers `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted` emitter payload delivery.
 - A MinIO Testcontainers suite exercises the R2 adapter contract through real S3-compatible HTTP for presigned single-part upload, multipart completion, abort, head/read/write, export reads, and prefix cleanup.
-- The complete backend suite currently passes 98 tests with 0 failures/errors and 1 skipped opt-in live R2 test; `spotlessCheck` passes, and the separately enabled live R2 smoke test passes against Cloudflare.
+- The complete backend suite currently passes 137 tests with 0 failures/errors and 1 skipped opt-in live R2 test; `spotlessCheck` and `openApiCheck` pass, and the separately enabled live R2 smoke test passes against Cloudflare.
 - The live R2 test verifies direct single-part and multipart upload, asynchronous processing, export generation/read, incomplete-upload cleanup, and retention cleanup without exposing signed URLs or credentials. Provider-issued multipart upload IDs are stored as opaque text, and quoted provider ETags are JSON-encoded as opaque values.
 
 ### Intentionally Temporary
@@ -95,9 +100,8 @@
 - Cleanup scheduling is simple and currently relies on periodic scans plus idempotent job handlers rather than explicit deduplication state.
 - Local infrastructure is intentionally process-local and non-durable: sessions, rate limits, gallery events, and background jobs are lost on restart and cannot coordinate multiple instances.
 - Backend `PUT` upload binary endpoints still exist for `local` storage mode. The intended production path is presigned direct upload to R2.
-- Events still store recoverable share tokens in plaintext `share_token_value`; Phase 3 uses an additive encrypted dual-write/backfill release before a deployment-gated plaintext-removal release.
-- Event close times remain nullable, retention is not snapshotted at closure, PATCH cannot distinguish omission from null, and feed cursors are timestamp-only.
-- Job publication remains after-commit and Redis backlog reclaim/atomic delayed delivery remain incomplete.
+- The Release B source and V6 migration are intentionally non-rolling and remain deployment-gated until the target preflight, backup/restore, cutover, and smoke-test evidence is complete.
+- Transactional outbox publication and pending-message reclaim are implemented; Redis delayed-ZSET atomic delivery and the remaining Phase 4 crash/retry convergence work are still incomplete.
 
 
 ## Approved Completion Decisions
@@ -126,7 +130,11 @@
   - `backend/src/main/java/com/eventcapture/backend/auth/AuthController.java`
   - `backend/src/main/java/com/eventcapture/backend/auth/AuthService.java`
 - Events:
+  - `backend/src/main/java/com/eventcapture/backend/event/Event.java`
   - `backend/src/main/java/com/eventcapture/backend/event/EventService.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenCipher.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenReleaseBPreflightService.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenDatabaseKeyringValidator.java`
   - `backend/src/main/java/com/eventcapture/backend/host/HostController.java`
 - Public guest flow:
   - `backend/src/main/java/com/eventcapture/backend/guest/PublicEventController.java`
@@ -152,6 +160,9 @@
   - `backend/src/main/resources/db/migration/V1__initial_schema.sql`
   - `backend/src/main/resources/db/migration/V2__upload_media_integrity.sql`
   - `backend/src/main/resources/db/migration/V3__widen_multipart_upload_id.sql`
+  - `backend/src/main/resources/db/migration/V4__phase3_release_a.sql`
+  - `backend/src/main/resources/db/migration/V5__transactional_outbox.sql`
+  - `backend/src/main/resources/db/migration/V6__phase3_release_b.sql`
 - Tests:
   - `backend/src/test/java/com/eventcapture/backend/integration/BackendIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/DistributedRuntimeIntegrationTest.java`
@@ -160,6 +171,9 @@
   - `backend/src/test/java/com/eventcapture/backend/integration/RuntimeConfigurationIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/LiveR2SmokeIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/S3CompatibleStorageIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3MigrationIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3ReleaseBMigrationH2Test.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3ReleaseBMigrationPostgresIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/gallery/GalleryEventBrokerTest.java`
   - `backend/src/test/java/com/eventcapture/backend/media/UploadServiceTest.java`
   - `backend/src/test/java/com/eventcapture/backend/media/UploadServicePhase2Test.java`
@@ -264,6 +278,11 @@
   - `APP_SESSION_NAMESPACE`
   - `APP_SESSION_TTL`
   - `APP_SESSION_SECURE_COOKIES`
+  - `APP_SHARE_TOKEN_ACTIVE_KEY_ID`
+  - `APP_SHARE_TOKEN_KEYRING` from the deployment secret store, retaining every referenced key ID
+  - `APP_SHARE_TOKEN_BACKFILL_ENABLED=false` except for a controlled backfill/rotation node
+  - `APP_SHARE_TOKEN_RELEASE_B_PREFLIGHT_ENABLED=false` except for a controlled audit node
+  - `APP_SHARE_TOKEN_BACKFILL_BATCH_SIZE`
   - `APP_MEDIA_PROCESSOR=java|libvips`
   - `APP_MEDIA_MAX_WIDTH`, `APP_MEDIA_MAX_HEIGHT`, and `APP_MEDIA_MAX_PIXELS`
   - optional `APP_STORAGE_PUBLIC_BASE_URL`; it must be empty in production until revocation-safe edge delivery exists
@@ -281,6 +300,7 @@
 
 ## Next Likely Work
 
-- Proceed to Phase 3 Release A of `.agents/docs/APPLICATION_COMPLETION_PLAN.md`: mandatory close times for new events, centralized lifecycle/retention snapshots, tri-state PATCH, compound cursors, and encrypted share-token dual-write/backfill support.`r`n- Keep Phase 3 Release B deployment-gated: operations must backfill ciphertext and assign explicit close times to every legacy null-close event before plaintext removal and non-null constraints.
-- Preserve the completed Phase 1 and Phase 2 runtime/security contracts and keep the full backend suite passing after every backend phase.
-- Do not scaffold or implement the Angular frontend until the product owner explicitly approves the completed wireframe and design; backend contract stabilization may continue meanwhile.
+- Execute the deployment-gated Phase 3 Release B procedure in `.agents/docs/PHASE3_RELEASE.md`; do not treat Phase 3 as complete until the target preflight, backup/restore, V6 cutover, and smoke-test evidence is recorded.
+- After the successful cutover, proceed to the remaining Phase 4 durable-job and realtime-convergence work without changing the completed Release B token/lifecycle contracts.
+- Preserve the completed Phase 1 through Phase 3 runtime/security contracts and keep the full backend and OpenAPI checks passing after every backend phase.
+- Do not scaffold or implement the Angular frontend until the product owner explicitly approves the completed wireframe and design; backend work may continue meanwhile.

@@ -39,6 +39,10 @@
 - Standardized ProblemDetail security/controller errors, safe magic-link delivery logs, safe ZIP entry names, and mode-aware readiness
 - Host event CRUD
 - Public event lookup by `{slug}/{shareToken}`
+- Mandatory event close times, persisted lifecycle/retention snapshots, tri-state PATCH semantics, and compound opaque feed cursors
+- Encrypted-only share-token persistence using a SHA-256 lookup hash plus AES-256-GCM ciphertext/key ID; Flyway V6 removes `share_token_value`
+- Optional bounded Release B preflight, hash-verified backfill/rotation, and normal startup validation of every referenced database key ID
+- Transactional job outbox publication plus Redis backlog and abandoned-pending-message recovery
 - Guest session cookie flow
 - Public gallery feed
 - SSE broker with in-process delivery in explicit `local` mode and Redis pub/sub propagation in explicit `redis` mode
@@ -78,10 +82,8 @@
 
 ## Active Completion Gaps
 
-- Events still persist the recoverable share token as plaintext in `share_token_value`; Phase 3 Release A adds encrypted dual-write/backfill support and deployment-gated Release B removes plaintext.
-- Event close times are nullable and lifecycle closure/retention snapshots are not persisted; existing null-close events require an operations-assigned close time before Release B.
-- Host and public feeds use timestamp-only cursors, so equal timestamps and concurrent inserts can create unstable traversal.
-- Job publication is after-commit rather than transactional; Redis backlog recovery, pending-message reclaim, and atomic delayed delivery remain incomplete.
+- Phase 3 Release B is implemented in source but remains operationally incomplete until the target zero-count preflight, backup/restore, non-rolling V6 cutover, and smoke-test evidence succeeds.
+- Redis delayed-ZSET delivery is still non-atomic, and Phase 4 must finish crash/retry convergence plus bounded transient `PROCESS_UPLOAD` retries.
 - Moderation transitions, strict asset cache headers, remaining-lifetime export presigns, and retention-purge multipart aborts remain Phase 6 work.
 
 ## Known Traps
@@ -94,10 +96,9 @@
 - OAuth is conditional:
   - `ApiSecurityConfig` only enables `oauth2Login` if a `ClientRegistrationRepository` bean exists
   - This avoids test boot failures when no OAuth client is configured
-- `events` stores both:
-  - `share_token_hash`
-  - `share_token_value`
-  - The latter is returned in host-facing `sharePath`
+- `events` stores `share_token_hash`, `share_token_ciphertext`, and `share_token_key_id`; V6 removes recoverable plaintext.
+- Host `sharePath` always decrypts ciphertext, public lookup remains hash-based, and startup rejects a keyring missing any referenced database key ID.
+- Release A and Release B binaries are incompatible across V6; follow the coordinated cutover/restore runbook instead of rolling or down-migrating.
 - `upload_intents.upload_token_hash` is still not used to authorize the local-storage binary upload endpoints
 - Public asset URLs are opaque tokens, but access is still checked against:
   - photo visibility

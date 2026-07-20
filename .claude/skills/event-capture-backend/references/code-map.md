@@ -25,7 +25,11 @@
   - `backend/src/main/java/com/eventcapture/backend/auth/OAuth2LoginSuccessHandler.java`
 - Host event APIs:
   - `backend/src/main/java/com/eventcapture/backend/host/HostController.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/Event.java`
   - `backend/src/main/java/com/eventcapture/backend/event/EventService.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenCipher.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenReleaseBPreflightService.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenDatabaseKeyringValidator.java`
 - Guest/public APIs:
   - `backend/src/main/java/com/eventcapture/backend/guest/PublicEventController.java`
   - `backend/src/main/java/com/eventcapture/backend/guest/GuestSessionService.java`
@@ -59,6 +63,9 @@
   - `backend/src/main/resources/db/migration/V1__initial_schema.sql`
   - `backend/src/main/resources/db/migration/V2__upload_media_integrity.sql`
   - `backend/src/main/resources/db/migration/V3__widen_multipart_upload_id.sql`
+  - `backend/src/main/resources/db/migration/V4__phase3_release_a.sql`
+  - `backend/src/main/resources/db/migration/V5__transactional_outbox.sql`
+  - `backend/src/main/resources/db/migration/V6__phase3_release_b.sql`
 
 ## Tests
 
@@ -70,6 +77,9 @@
   - `backend/src/test/java/com/eventcapture/backend/integration/RuntimeConfigurationIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/S3CompatibleStorageIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/LiveR2SmokeIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3MigrationIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3ReleaseBMigrationH2Test.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3ReleaseBMigrationPostgresIntegrationTest.java`
 - Unit coverage:
   - `backend/src/test/java/com/eventcapture/backend/event/EventServiceTest.java`
   - `backend/src/test/java/com/eventcapture/backend/auth/AuthServiceTest.java`

@@ -50,7 +50,9 @@ Historical result: the forced backend test run passed 44 tests with no failures;
 - Production and worker-only local modes, unavailable required Redis, and conflicting canonical/legacy infrastructure settings now fail startup.
 - Security and controller errors use standardized ProblemDetails; liveness is process-focused and readiness includes the database plus mode-aware Redis health.
 - Phase 2 implementation was completed on 2026-07-17 with media-fixture, checksum, multipart, cleanup, presigner, production-validation, and S3-compatible storage tests written before runtime changes.
-- The full backend suite passes 98 tests with 0 failures/errors and 1 skipped opt-in live R2 test. The production image was built and the exact libvips command was validated as the non-root runtime user.
+- The full backend suite passes 137 tests with 0 failures/errors and 1 skipped opt-in live R2 test; `spotlessCheck` and the canonical `openApiCheck` pass. The production image was built and the exact libvips command was validated as the non-root runtime user.
+- Phase 3 Release A and both deployable Release B stages are implemented in source with tests written first. The target Release B maintenance-window cutover remains the Phase 3 completion gate.
+- Phase 4 is the next code phase after that cutover; its transactional outbox and pending-message recovery foundation already exists.
 - Phase 2's live-provider exit gate passed on 2026-07-17 using the replacement token loaded directly from the ignored `.env`. The live run exposed two covered regressions: provider multipart upload IDs now persist as opaque text through Flyway V3, and the smoke client JSON-encodes quoted provider ETags.
 - Phase 7 remains on hold.
 
@@ -66,7 +68,7 @@ The product owner approved these decisions on 2026-07-17:
 
 Frontend implementation is explicitly paused. Do not scaffold Angular, generate a frontend client, or implement Phase 7 until the product owner finishes and explicitly approves the wireframe and design. Backend contract and OpenAPI stabilization may continue.
 
-## Phase 0 — Repository and Secret Hygiene
+## Phase 0 - Repository and Secret Hygiene
 
 ### Tests and checks first
 
@@ -87,7 +89,7 @@ Frontend implementation is explicitly paused. Do not scaffold Angular, generate 
 - Guidance mirror verification is byte-for-byte clean.
 - No tracked file contains live credentials or tokens.
 
-## Phase 1 — Critical Security and Deterministic Runtime Selection
+## Phase 1 - Critical Security and Deterministic Runtime Selection
 
 **Status: completed 2026-07-17.** The focused local/Redis suites and the complete formatted backend suite pass.
 
@@ -116,7 +118,7 @@ Frontend implementation is explicitly paused. Do not scaffold Angular, generate 
 - Cross-origin host mutations work only for configured origins with the correct CSRF header.
 - Logs and ZIP archives pass the security tests.
 
-## Phase 2 — Upload, Storage, and Media Integrity
+## Phase 2 - Upload, Storage, and Media Integrity
 
 Status: complete. Runtime behavior, local and S3-compatible contracts, production-image libvips execution, and the opt-in live Cloudflare R2 workflow all pass.
 
@@ -146,68 +148,64 @@ Status: complete. Runtime behavior, local and S3-compatible contracts, productio
 - Expired or failed multipart uploads do not remain billable indefinitely.
 - The same storage contract passes locally, against the S3-compatible integration service, and in the opt-in live R2 smoke test.
 
-## Phase 3 — Lifecycle, Contracts, Pagination, and Encrypted Share Tokens
+## Phase 3 - Lifecycle, Contracts, Pagination, and Encrypted Share Tokens
 
-Phase 3 is the next implementation phase and is split into two rolling-compatible releases. Theme and cover-photo contracts are excluded until design approval.
+**Status: implemented in source; target Release B cutover pending.** Release A is additive and rolling-compatible. Release B is an intentionally coordinated, non-rolling schema/runtime cutover. Theme and cover-photo contracts remain excluded until design approval.
 
-### Tests first
+### Implemented Release A
 
-- Use a fixed `Clock` to cover before/exact open, exact close, force close, force open after scheduled close, return to default, expiry, UTC normalization, and versioned retention selection.
-- Use MockMvc to prove create requires `scheduledUploadCloseAt`, open is before close, PATCH distinguishes omission/null/replacement, only the optional open time can be cleared, removed retention inputs are rejected, and an empty PATCH is a no-op.
-- Cover compound cursor ties, multiple pages, concurrent newer inserts, moderation/deletion between pages, malformed/unsupported versions, and snapshot traversal without duplicates or omissions.
-- Cover cross-host and cross-event/cross-guest identifiers for events, photos, moderation, exports/downloads, upload intents, multipart completion, and finalize.
-- Cover V3-to-V4 migration, AES-GCM round trips/random nonces/event-ID AAD/tampering/unknown keys/rotation, Release-A dual read/write, idempotent batched backfill, Release-B preconditions, and log/error redaction.
+- Effective-dated global retention settings with a Flyway-seeded 365-day default, closure snapshots, and persisted expiry.
+- Mandatory close times for new events, centralized lifecycle state, tri-state PATCH semantics, and compound opaque feed cursors.
+- AES-256-GCM share-token encryption with event UUID AAD, lookup hashes, rolling-compatible dual read/write, and bounded backfill/rotation.
+- Canonical OpenAPI snapshot checking and ownership/cursor/lifecycle regression coverage.
 
-### Release A — additive, rolling-compatible
+### Implemented Release B readiness patch
 
-- Add an effective-dated global retention settings table with UUID identity, positive `durationDays`, unique `effectiveAt`, audit timestamps, and a Flyway-seeded 365-day default. Operations change retention by inserting a setting version; there is no host/public endpoint or environment override.
-- Add nullable `uploadsClosedAt`, `retentionDurationDaysApplied`, `shareTokenCiphertext`, and `shareTokenKeyId` event columns while retaining `retentionExpiresAt` and legacy `share_token_value`.
-- Add compound feed, guest-session lookup, scheduled-close, retention scan, and effective-setting lookup indexes.
-- Centralize lifecycle state (`SCHEDULED`, `OPEN`, `CLOSED`, `EXPIRED`) for event responses, sessions, uploads, gallery access, and maintenance. Snapshot the retention version at closure; expiry is terminal. A closed event changes schedule without reopening unless `FORCE_OPEN` is explicit.
-- Require close time for new events. Remove host-controlled retention input. Replace PATCH with typed tri-state semantics: omitted is unchanged, null clears only nullable fields, unknown/removed fields fail, and an empty object is valid.
-- Configure `APP_SHARE_TOKEN_ACTIVE_KEY_ID` and semicolon-delimited `APP_SHARE_TOKEN_KEYRING`. Use AES-256-GCM with fresh 12-byte nonces, a 128-bit tag, and event UUID AAD. New nodes dual-write, read ciphertext first, fall back to plaintext, and expose an opt-in bounded backfill/rotation mode without logging token material.
-- Order feeds by `(createdAt DESC, id DESC)` and emit only opaque `v1.<base64url-json>` cursors containing `createdAt` and `id`; reject legacy timestamp-only cursors.
-- Commit a canonical OpenAPI snapshot and a Gradle check that boots the API, canonicalizes `/v3/api-docs`, and compares it with the snapshot.
+- Backfill verifies the recovered token hash before encrypting or rotating and aborts the batch with token-safe errors on any mismatch or recovery failure.
+- Optional bounded, read-only application preflight reports missing encryption fields, unknown key IDs, decryption failures, hash mismatches, null closes, and invalid windows without exposing token material.
+- The SQL preflight lists safe operational close-time fields, encryption aggregates, invalid windows, referenced key IDs, and missing due-closure snapshots. It performs no updates.
+- API and worker production configuration includes the secret-backed keyring plus mutually exclusive backfill and preflight flags.
 
-### Release B — deployment-gated final enforcement
+### Implemented Release B enforcement
 
-- Run the token backfill and verify zero rows lack ciphertext. Report every null-close event and require operations to assign an explicit close time; do not guess or automatically close legacy events. Verify every ciphertext key ID remains configured.
-- Only after those gates, apply a final migration making close time/ciphertext/key ID non-null and dropping `share_token_value`, then remove dual writes and plaintext fallback.
-- Regenerate OpenAPI, run the complete suite and repository checks, and update current-state guidance. Phase 3 is complete only after Release B succeeds in the target environment.
+- Flyway V6 makes scheduled close, ciphertext, and key ID non-null; rejects blank encrypted fields and invalid upload windows; and physically drops `share_token_value`.
+- `Event` is encrypted-only. Creation hashes and encrypts the transient raw token before persistence; host share paths always decrypt ciphertext; public lookup remains hash-based.
+- Post-B backfill rotates only old-key ciphertext. Normal startup fails if any database key ID is absent from the configured keyring.
+- PostgreSQL migration tests cover V3-to-V5 compatibility, real AES-GCM V5-to-V6 data, every invalid V5 gate condition in isolated schemas, and physical plaintext-column removal. H2 covers clean V1-to-V6.
+- The canonical OpenAPI check reports no contract delta.
 
-### Exit criteria
+### Deployment gate and exit criteria
 
-- Lifecycle boundaries, tri-state PATCH, stable pagination, mandatory close times, effective-dated global retention, encrypted-only token persistence, ownership rules, and the committed OpenAPI contract all pass.
-## Phase 4 — Durable Jobs and Realtime Convergence
+- Phase 3 is complete only after the target environment follows `.agents/docs/PHASE3_RELEASE.md`: zero-count SQL/application preflights, authoritative legacy close-time remediation, due-closure snapshots, verified backup/restore evidence, full Release A shutdown, single-worker V6 migration, smoke tests, and monitored traffic restoration.
+- Rollback after V6 is snapshot restore plus the Release A binary and full old keyring; there is no down migration or manual plaintext reconstruction.
 
-**Status: partially implemented.** Redis Streams, delayed retries, a DLQ, and idempotent handlers exist; the remaining delta is durable transactional publication and crash/backlog convergence.
+## Phase 4 - Durable Jobs and Realtime Convergence
 
-### Tests first
+**Status: partially implemented and next after the Release B target cutover.** Transactional outbox publication, beginning-of-stream consumer groups, abandoned pending-message reclaim, delayed retries, a DLQ, idempotent handlers, and queue/worker metrics exist. Remaining work is atomic delayed delivery plus exhaustive crash/restart, retry-classification, and convergence proof.
 
-- Enqueue work before a worker consumer group exists and prove it is processed after startup.
-- Simulate a worker crash after message delivery and prove pending messages are reclaimed after an idle threshold.
-- Test retry limits, exponential delay, poison-message dead-lettering, delayed-job atomicity, duplicate delivery, and handler idempotency.
-- Simulate database commit success with publication failure and process restart; prove committed work is eventually published exactly enough for idempotent completion.
-- Run multiple API instances and a separate worker against shared PostgreSQL/Redis; verify SSE state convergence and resync after disconnection.
-- Assert metrics for queue age, pending count, retries, dead letters, handler duration, and terminal failures.
+### Remaining tests first
 
-### Implementation
+- Prove Redis delayed delivery cannot lose a job between due selection and stream publication.
+- Simulate publish-success/mark-success crashes, duplicate publication, worker termination after delivery, and repeated process restarts; prove eventual completion through idempotent handlers.
+- Add bounded transient `PROCESS_UPLOAD` retry tests for storage, native command, and dependency failures while keeping invalid/corrupt media permanent.
+- Run multiple API instances and separate workers against shared PostgreSQL/Redis; verify SSE state convergence and REST resync after disconnection.
+- Assert actionable metrics/health for outbox age, pending count, retries, dead letters, handler duration, and terminal failures.
 
-- Create consumer groups from the beginning of the stream or otherwise explicitly drain backlog.
-- Reclaim abandoned pending messages with a supported Redis Streams pending/claim strategy.
-- Replace after-commit publication and delayed Redis ZSET state with a transactional `outbox_messages` table. Initial work, retries, and gallery notifications are committed with domain state; local mode drains it in-process and Redis mode relays due rows.
-- Use idempotency keys and persisted terminal state in every handler.
-- Create consumer groups from the beginning, reclaim abandoned pending entries with `XAUTOCLAIM`, and acknowledge only after handler transactions commit. Treat publish/mark races as at-least-once and keep consumers idempotent.
-- Expose dead-letter and retry health through metrics and actionable alerts rather than logs alone.
-- Keep the in-process dispatcher only for the explicit single-process local mode.
+### Remaining implementation
+
+- Replace the Redis delayed-ZSET due-read/remove sequence with an atomic move or an equivalent outbox-only scheduling path.
+- Preserve at-least-once outbox/stream semantics and make every side-effecting handler safe under duplicate publication and delivery.
+- Classify transient upload-processing failures for bounded exponential retry and DLQ/terminal visibility; keep media-validation failures non-retryable.
+- Expose stuck outbox, pending, retry, and dead-letter conditions through deployable alerts rather than logs alone.
+- Keep the in-process dispatcher only for explicit single-process local mode.
 
 ### Exit criteria
 
 - Restart and crash tests demonstrate eventual completion without skipped committed work.
-- Duplicate delivery is harmless.
-- Operators can detect and diagnose stuck or dead-lettered jobs.
+- Duplicate delivery is harmless, delayed delivery is atomic, and transient work has bounded retries.
+- Operators can detect and diagnose stuck, retrying, terminal, or dead-lettered jobs.
 
-## Phase 5 — Authentication, OAuth, and Abuse Controls
+## Phase 5 - Authentication, OAuth, and Abuse Controls
 
 **Status: partially implemented.** Magic links, sessions, conditional Google OAuth, CSRF/CORS, and base rate limits exist; full integration coverage, safe frontend redirects, and risk-based challenge policy remain.
 
@@ -232,7 +230,7 @@ Phase 3 is the next implementation phase and is split into two rolling-compatibl
 - No auth error path leaks credentials or permits an untrusted redirect.
 - Abuse controls do not challenge ordinary event traffic by default.
 
-## Phase 6 — Privacy, Moderation, Delivery, and Exports
+## Phase 6 - Privacy, Moderation, Delivery, and Exports
 
 **Status: partially implemented.** Authorized asset reads, moderation endpoints, exports, and cleanup exist; state-machine, cache-header, lifetime-bound presign, multipart-purge, and partial-failure gaps remain.
 
@@ -255,11 +253,11 @@ Phase 3 is the next implementation phase and is split into two rolling-compatibl
 - A hidden, deleted, disabled, or expired asset follows the approved access policy even when its old URL is known.
 - Exports are authorized, traversal-safe, time-limited, and cleaned up.
 
-## Phase 7 — Angular Guest and Host Application
+## Phase 7 - Angular Guest and Host Application
 
 **Status: PAUSED by product-owner direction.**
 
-This phase is retained as future scope only. Do not scaffold or implement it until the product owner explicitly approves the completed wireframe and design. After that approval, begin only when Phases 1–3 have frozen the consumed auth, event, upload, gallery, and pagination contracts.
+This phase is retained as future scope only. Do not scaffold or implement it until the product owner explicitly approves the completed wireframe and design. After that approval, begin only when Phases 1-3 have frozen the consumed auth, event, upload, gallery, and pagination contracts.
 
 ### Tests first
 
@@ -281,7 +279,7 @@ This phase is retained as future scope only. Do not scaffold or implement it unt
 - The complete guest and host v1 journeys pass on supported mobile and desktop browsers.
 - No frontend flow depends on undocumented backend behavior.
 
-## Phase 8 — Operations, Deployment, and Delivery Confidence
+## Phase 8 - Operations, Deployment, and Delivery Confidence
 
 ### Tests and checks first
 
@@ -302,7 +300,7 @@ This phase is retained as future scope only. Do not scaffold or implement it unt
 - Alerts identify user-impacting dependency, queue, upload, and auth failures.
 - Restore and rollback procedures have been exercised rather than only documented.
 
-## Phase 9 — Release Validation
+## Phase 9 - Release Validation
 
 - Run the full backend suite with PostgreSQL and Redis Testcontainers.
 - Run all Angular unit/component, lint, build, and Playwright suites.
@@ -320,13 +318,13 @@ The release candidate is acceptable only when all required checks pass and remai
 
 | Area | Unit | MockMvc/component | PostgreSQL/Redis containers | S3-compatible/live R2 | Browser E2E |
 | --- | --- | --- | --- | --- | --- |
-| Sessions, CSRF, CORS | Policy/config selectors | Required | Required for Redis mode | — | Required |
-| Event lifecycle and PATCH | Required | Required | Required | — | Required |
+| Sessions, CSRF, CORS | Policy/config selectors | Required | Required for Redis mode | N/A | Required |
+| Event lifecycle and PATCH | Required | Required | Required | N/A | Required |
 | Upload validation/media | Required | Required | Required | Required | Required |
 | Jobs/retries/outbox | Required | Focused API tests | Required, including crash/restart | Storage side effects | Indirect journey |
 | Gallery/SSE/moderation | Broker and cursor logic | Required | Required, split runtime | Delivery policy | Required |
 | Exports/retention | Naming and policy | Required | Required | Required | Required |
-| OAuth/abuse | Risk and redirect policy | Required | Required where state persists | — | Required |
+| OAuth/abuse | Risk and redirect policy | Required | Required where state persists | N/A | Required |
 
 ## Definition of Complete
 
@@ -356,4 +354,4 @@ The application is complete for v1 when:
 3. Deliver Release A additively, run focused suites, then `./gradlew spotlessCheck test` and the OpenAPI/repository checks.
 4. Run the operational close-time and ciphertext backfills in the target environment.
 5. Deliver Release B only after its data gates pass; do not collapse the two migrations into one rollout.
-6. Continue with the remaining Phase 4–6 and backend-only Phase 0/8/9 deltas. Angular remains paused.
+6. Continue with the remaining Phase 4-6 and backend-only Phase 0/8/9 deltas. Angular remains paused.

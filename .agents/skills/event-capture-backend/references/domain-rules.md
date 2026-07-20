@@ -23,10 +23,13 @@
   - `FORCE_CLOSED`
 - Uploads are open when:
   - `FORCE_OPEN`, or
-  - `DEFAULT` and current time is after `scheduledUploadOpenAt` if present, and before `scheduledUploadCloseAt` if present
+  - `DEFAULT` and current time is after `scheduledUploadOpenAt` if present, and before the mandatory `scheduledUploadCloseAt`
 - Uploads are closed when:
   - `FORCE_CLOSED`, or
   - current time is before scheduled open, or at/after scheduled close
+- Scheduled open is optional but, when present, must be strictly before the mandatory close time.
+- The first effective closure snapshots `uploadsClosedAt`, the effective retention duration, and `retentionExpiresAt`; expiry is terminal.
+- `FORCE_OPEN` may explicitly reopen a scheduled closure. Returning to `DEFAULT` re-applies the schedule without discarding closure/retention history.
 - Gallery is available when:
   - `galleryEnabled == true`
   - retention has not expired
@@ -38,6 +41,9 @@
 - Public backend APIs use:
   - `/api/v1/public/events/{slug}/{shareToken}/...`
 - `requirePublicEvent` validates the slug lookup plus SHA-256 of the raw share token
+- The database stores only `share_token_hash`, AES-256-GCM ciphertext, and its key ID after V6.
+- Encryption binds ciphertext to the event UUID as AAD; host `sharePath` decrypts it unconditionally.
+- Existing raw tokens and public paths remain unchanged through Release B. Missing referenced key IDs fail startup.
 
 ## Upload Rules
 
