@@ -72,8 +72,11 @@
   - uses Java/ImageIO as the portable fallback and libvips in production for orientation normalization, resizing, metadata stripping, and public-variant re-encoding
   - records dimensions and marks the photo `READY`, or marks invalid/corrupt media `FAILED`
   - publishes SSE `photo_ready` only after processing succeeds
-- Current retry limitation:
-  - every `PROCESS_UPLOAD` failure is currently non-retryable; Phase 4 must classify invalid/corrupt media as permanent and retry transient storage, command, and dependency failures
+  - serializes duplicate processing with a pessimistic photo lock and writes public variants to deterministic per-photo keys so replay overwrites rather than orphans objects
+  - terminal processing failure deletes the complete per-photo variant prefix before persisting `FAILED`
+- Retry classification:
+  - invalid/corrupt media, missing photo targets, and invalid job input are permanent
+  - storage, native-command, and dependency failures retry with bounded exponential backoff before terminal failure and DLQ publication
 
 ## Photo and Gallery Rules
 
@@ -97,7 +100,13 @@
   - `photo_hidden`
   - `photo_unhidden`
   - `photo_deleted`
+- SSE events are transient hints; every reconnect must resynchronize from the authoritative paginated REST feed before applying later live events.
 
+## Export and Multipart Idempotency
+
+- Export handlers serialize duplicate builds with a pessimistic export-job lock and always address `exports/{eventId}/{exportId}.zip`; terminal failure removes that deterministic key even when the archive path did not commit.
+- A repeated remote multipart completion may treat `NoSuchUpload`/404 as prior success only when `HEAD` confirms the intended final object exists. Missing final objects remain failures.
+- Retention and deleted-photo cleanup remove deterministic storage prefixes as well as database-recorded paths so storage writes that preceded a rolled-back database commit remain recoverable.
 ## Moderation and Export
 
 - Moderation actions supported:

@@ -51,7 +51,7 @@
 - Share tokens are persisted only as a SHA-256 lookup hash plus AES-256-GCM ciphertext and key ID. Host share paths decrypt the original token; public lookup remains hash-based and existing API paths/shapes are unchanged.
 - The optional Release B preflight scans events in bounded UUID-keyset batches and safely reports missing encryption data, unknown keys, decryption/hash failures, missing closes, and invalid windows. Backfill and preflight cannot run together.
 - Post-B backfill performs ciphertext-only key rotation, and normal startup rejects any database key ID absent from the configured API/worker keyring.
-- Flyway V6 enforces non-null close/ciphertext/key ID fields, nonblank encrypted fields, ordered upload windows, and physical removal of `share_token_value`. The code is ready for the coordinated non-rolling cutover; Phase 3 remains incomplete until that target deployment succeeds.
+- Flyway V6 enforces non-null close/ciphertext/key ID fields, nonblank encrypted fields, ordered upload windows, and physical removal of `share_token_value`. No release or application data has been deployed, so Phase 3 is complete for the greenfield first deployment: Flyway can migrate a fresh database directly through V6. The coordinated cutover applies only to a future upgrade from a pre-V6 environment.
 - SSE fan-out uses local in-process delivery in explicit `local` infrastructure mode and Redis pub/sub propagation in explicit `redis` mode.
 - Upload validation for allowed content types and size limits.
 - Storage abstraction with:
@@ -66,30 +66,33 @@
   - multipart upload init stores a real multipart upload ID
   - multipart complete calls storage-backed multipart completion
 - Upload initialization accepts an optional client SHA-256 checksum; finalize always computes the stored object's SHA-256, persists it on the upload intent and photo, rejects mismatches, and removes mismatched objects.
-- Multipart upload part numbers and local part sizes must match the advertised plan, completion requires every contiguous part exactly once, and repeated complete/finalize calls are idempotent.
+- Multipart upload part numbers and local part sizes must match the advertised plan, completion requires every contiguous part exactly once, and repeated complete/finalize calls are idempotent. R2 `NoSuchUpload`/404 completion is accepted as prior success only when `HEAD` confirms the final object.
 - Completed multipart state is persisted. Expired incomplete multipart uploads are aborted before object prefixes and intent state are deleted; R2 `NoSuchUpload` is treated as an idempotent abort success.
 - Upload finalize verifies stored size and digest, creates the `Photo` in `UPLOADED` state, returns `202 Accepted`, and enqueues background processing.
 - AWS SDK upload checksum calculation is set to `WHEN_REQUIRED` for R2 compatibility; generated presigned PUTs are tested to exclude unsupported automatic full-object CRC32 headers.
-- Background job dispatch selects in-process scheduling in `local` mode and Redis Streams with delayed retry scheduling in `redis` mode. Backlog recovery, pending-message reclaim, and atomic delayed delivery remain completion work.
+- Background job dispatch selects direct in-process execution in `local` mode and Redis Streams in `redis` mode. Initial and delayed work is persisted in the PostgreSQL transactional outbox, removing the lossy Redis delayed-ZSET move; backlog recovery and abandoned pending-message reclaim are implemented. Existing-group startup always deletes its bootstrap record, including the `BUSYGROUP` path.
 - Worker maintenance now scans for:
   - deleted-photo purge jobs after the 7-day retention window
   - retained-event purge jobs when `retentionExpiresAt` is due
   - expired export archive cleanup
   - expired upload-intent cleanup
-- Upload worker processing now creates gallery and thumbnail variants asynchronously, marks photos `READY` or `FAILED`, and emits `photo_ready` only after processing.
-- `PROCESS_UPLOAD` jobs are currently non-retryable as a whole: invalid/corrupt media correctly becomes `FAILED`, but Phase 4 must add bounded retries for transient storage, command, and dependency failures.
+- Upload worker processing now creates gallery and thumbnail variants asynchronously, marks photos `READY` or `FAILED`, and emits `photo_ready` only after processing. Duplicate handlers take a pessimistic photo lock, overwrite deterministic per-photo variant keys, and remove the full variant prefix on terminal failure.
+- `PROCESS_UPLOAD` distinguishes permanent invalid/corrupt media from transient storage, native-command, and dependency failures. Transient failures use bounded exponential retries and become terminal/DLQ-visible only after exhaustion.
 - Upload worker media inspection verifies JPEG, PNG, WEBP, HEIC, and HEIF signatures against the declared MIME type, rejects truncated/spoofed content, validates encoded/decoded dimensions and pixel limits, and normalizes JPEG EXIF orientation before publishing.
 - Native media commands have a 60-second timeout and bounded diagnostic output.
 - The media variant pipeline is selected through `APP_MEDIA_PROCESSOR=java|libvips`: Java remains the portable local/test fallback, while production Compose selects libvips for bounded auto-rotating, metadata-stripping re-encoding. Production images include `libvips-tools`, HEIF, and WEBP helpers.
-- Export jobs are now executed asynchronously and can return a signed or local download URL once `READY`.
+- Export jobs are now executed asynchronously and can return a signed or local download URL once `READY`. Duplicate builds take a pessimistic export-job lock, use a deterministic archive key, and remove that key on terminal failure even if its database path did not commit.
 - Public feeds can build asset URLs from `APP_STORAGE_PUBLIC_BASE_URL` outside production. Production rejects a non-empty public base URL and uses backend-authorized asset reads so strict hide/delete/disable/expiry revocation cannot be bypassed by an old CDN object URL.
 - Public asset reads and export reads stream through the storage abstraction instead of reading directly from the filesystem.
 - Unit tests covering `EventService`, `AuthService`, `GuestSessionService`, `SimpleRateLimiter`, `UploadService`, and `R2ObjectStorageService`.
 - Integration tests now run against PostgreSQL and Redis Testcontainers for the main backend behavior path, including Redis-backed host sessions, while keeping local storage for binary assets.
-- Split-runtime integration coverage now exercises separate `api` and `worker` boot paths against shared PostgreSQL and Redis, including worker-only job consumption, moderation state convergence, and maintenance cleanup.
+- Split-runtime integration coverage now uses command-line overrides to guarantee separate `api` and `worker` boot paths share PostgreSQL and Redis. A real HTTP SSE client on API A observes API B changes, disconnects across a state transition, resynchronizes from REST, reconnects, and observes the next live event.
 - `GalleryEventBrokerTest` covers `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted` emitter payload delivery.
+- `phase4ProcessTest` launches child API/worker JVMs against PostgreSQL and AOF-backed Redis, proving outbox replay after publish-before-commit termination, pending reclaim after handler-commit-before-ack termination, and recovery of readiness/publication/consumption across Redis stop/start.
+- The storage-side-effect audit covers deterministic media/export keys, pessimistic handler locks, orphan-prefix cleanup, and uncertain multipart-completion recovery.
+- Deployment-owned Prometheus rules and executable `promtool` tests cover outbox stall/backlog, pending work, retries, DLQ depth, terminal/publish failures, p95 handler latency, and missing queue metrics. Bitbucket and Jenkins validate them with pinned Prometheus `v3.5.0`.
 - A MinIO Testcontainers suite exercises the R2 adapter contract through real S3-compatible HTTP for presigned single-part upload, multipart completion, abort, head/read/write, export reads, and prefix cleanup.
-- The complete backend suite currently passes 137 tests with 0 failures/errors and 1 skipped opt-in live R2 test; `spotlessCheck` and `openApiCheck` pass, and the separately enabled live R2 smoke test passes against Cloudflare.
+- The complete backend verification passes 154 standard tests with 0 failures/errors and 1 skipped opt-in live R2 test, plus the child-process Phase 4 recovery test and the OpenAPI contract test; `spotlessCheck` passes, and the separately enabled live R2 smoke test passes against Cloudflare.
 - The live R2 test verifies direct single-part and multipart upload, asynchronous processing, export generation/read, incomplete-upload cleanup, and retention cleanup without exposing signed URLs or credentials. Provider-issued multipart upload IDs are stored as opaque text, and quoted provider ETags are JSON-encoded as opaque values.
 
 ### Intentionally Temporary
@@ -100,8 +103,7 @@
 - Cleanup scheduling is simple and currently relies on periodic scans plus idempotent job handlers rather than explicit deduplication state.
 - Local infrastructure is intentionally process-local and non-durable: sessions, rate limits, gallery events, and background jobs are lost on restart and cannot coordinate multiple instances.
 - Backend `PUT` upload binary endpoints still exist for `local` storage mode. The intended production path is presigned direct upload to R2.
-- The Release B source and V6 migration are intentionally non-rolling and remain deployment-gated until the target preflight, backup/restore, cutover, and smoke-test evidence is complete.
-- Transactional outbox publication and pending-message reclaim are implemented; Redis delayed-ZSET atomic delivery and the remaining Phase 4 crash/retry convergence work are still incomplete.
+- Phase 4 is complete for the approved backend scope: transactional outbox/delays, reclaim/retries/DLQ, child-process crash/restart and Redis-interruption proof, live multi-API SSE disconnect/resync proof, storage-side-effect idempotency auditing, and deployment-owned alerts are implemented. Broader dashboards remain later observability work.
 
 
 ## Approved Completion Decisions
@@ -154,7 +156,12 @@
   - `backend/src/main/java/com/eventcapture/backend/infra/storage/StorageConfig.java`
 - Jobs and async processing:
   - `backend/src/main/java/com/eventcapture/backend/jobs/`
+  - `backend/src/main/java/com/eventcapture/backend/jobs/JobQueueMonitor.java`
+  - `backend/src/main/java/com/eventcapture/backend/jobs/JobCrashCheckpoint.java`
+  - `backend/deploy/prometheus/event-capture-alerts.yml`
   - `backend/src/main/java/com/eventcapture/backend/media/MediaProcessingService.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/NativeMediaCommandException.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/TransientMediaProcessingException.java`
   - `backend/src/main/java/com/eventcapture/backend/export/ExportArchiveService.java`
 - Persistence:
   - `backend/src/main/resources/db/migration/V1__initial_schema.sql`
@@ -166,6 +173,7 @@
 - Tests:
   - `backend/src/test/java/com/eventcapture/backend/integration/BackendIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/DistributedRuntimeIntegrationTest.java`
+  - `backend/src/phase4ProcessTest/java/com/eventcapture/backend/integration/Phase4ProcessRecoveryIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/WorkerRoleIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/LocalRuntimeIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/RuntimeConfigurationIntegrationTest.java`
@@ -283,6 +291,8 @@
   - `APP_SHARE_TOKEN_BACKFILL_ENABLED=false` except for a controlled backfill/rotation node
   - `APP_SHARE_TOKEN_RELEASE_B_PREFLIGHT_ENABLED=false` except for a controlled audit node
   - `APP_SHARE_TOKEN_BACKFILL_BATCH_SIZE`
+  - A greenfield first deployment keeps both Release B maintenance flags disabled; they are not startup prerequisites.
+  - `APP_JOBS_OUTBOX_RELAY_DELAY`, `APP_JOBS_RECLAIM_IDLE`, and `APP_JOBS_QUEUE_MONITOR_DELAY`
   - `APP_MEDIA_PROCESSOR=java|libvips`
   - `APP_MEDIA_MAX_WIDTH`, `APP_MEDIA_MAX_HEIGHT`, and `APP_MEDIA_MAX_PIXELS`
   - optional `APP_STORAGE_PUBLIC_BASE_URL`; it must be empty in production until revocation-safe edge delivery exists
@@ -300,7 +310,7 @@
 
 ## Next Likely Work
 
-- Execute the deployment-gated Phase 3 Release B procedure in `.agents/docs/PHASE3_RELEASE.md`; do not treat Phase 3 as complete until the target preflight, backup/restore, V6 cutover, and smoke-test evidence is recorded.
-- After the successful cutover, proceed to the remaining Phase 4 durable-job and realtime-convergence work without changing the completed Release B token/lifecycle contracts.
+- Preserve the completed Phase 4 child-process, Redis-interruption, live SSE resync, storage-idempotency, and alert-rule gates while continuing Phases 5-6 and later backend operational work.
+- Use `.agents/docs/PHASE3_RELEASE.md` only if a future environment must upgrade existing pre-V6 data. The current undeployed greenfield environment migrates directly through V6 with the configured keyring and both maintenance flags disabled.
 - Preserve the completed Phase 1 through Phase 3 runtime/security contracts and keep the full backend and OpenAPI checks passing after every backend phase.
 - Do not scaffold or implement the Angular frontend until the product owner explicitly approves the completed wireframe and design; backend work may continue meanwhile.

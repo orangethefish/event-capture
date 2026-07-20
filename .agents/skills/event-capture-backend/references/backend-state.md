@@ -42,22 +42,25 @@
 - Mandatory event close times, persisted lifecycle/retention snapshots, tri-state PATCH semantics, and compound opaque feed cursors
 - Encrypted-only share-token persistence using a SHA-256 lookup hash plus AES-256-GCM ciphertext/key ID; Flyway V6 removes `share_token_value`
 - Optional bounded Release B preflight, hash-verified backfill/rotation, and normal startup validation of every referenced database key ID
-- Transactional job outbox publication plus Redis backlog and abandoned-pending-message recovery
+- Transactional job outbox publication, database-backed delayed scheduling, Redis backlog recovery, and abandoned-pending-message reclaim that cannot be starved by steady new work
 - Guest session cookie flow
 - Public gallery feed
 - SSE broker with in-process delivery in explicit `local` mode and Redis pub/sub propagation in explicit `redis` mode
 - Upload init, presigned single-part and multipart R2 preparation, local-storage binary upload fallback, multipart completion, and finalize
 - Async worker-driven photo processing after finalize
-- All `PROCESS_UPLOAD` failures are currently non-retryable and mark the photo `FAILED`; Phase 4 must selectively retry transient storage, command, and dependency failures while keeping invalid/corrupt media permanent
+- `PROCESS_UPLOAD` retries transient storage, native-command, and dependency failures with bounded exponential backoff while invalid/corrupt media and invalid job targets remain permanent
 - Host moderation endpoints
 - Async export job creation, status lookup, signed/local download URLs, and expired-download enforcement
 - Flyway schema for all core domain tables
 - Storage abstraction for local filesystem and Cloudflare R2
-- Redis Streams worker jobs with delayed retries and a dead-letter stream
+- Redis Streams worker jobs with outbox-backed delayed retries and a dead-letter stream
+- Current gauges for unpublished outbox count/age, pending stream entries, and DLQ depth, plus retry/failure/claim counters and tagged handler-duration histograms
 - Worker maintenance cleanup for deleted photos, retained events, expired exports, and expired upload intents
 - MockMvc integration tests for host auth, event flows, guest uploads, gallery visibility, moderation, cleanup, Redis-backed sessions, and worker-driven processing
-- Split-runtime integration tests for separate `api` and `worker` contexts on shared PostgreSQL and Redis
+- Split-runtime integration tests for separate `api` and `worker` contexts on genuinely shared PostgreSQL and Redis, including real cross-instance HTTP SSE disconnect/REST-resync/reconnect proof
 - Local-runtime integration tests for Redis-free auth/session/CSRF/logout, CORS, ProblemDetails, and health groups
+- OS-process Phase 4 tests for outbox publish-before-commit crash replay, handler-commit-before-ack reclaim, duplicate drain, and AOF-backed Redis stop/start while API and worker JVMs remain alive
+- Deployable Prometheus alert rules and executable `promtool` tests for current queue and handler meters
 - Startup tests for production/worker local-mode rejection, contradictory settings, and unavailable required Redis
 - Unit tests proving magic-link logs omit tokens/URLs and export ZIP names are traversal-safe
 - Broker unit tests for `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted` emitter delivery
@@ -82,8 +85,8 @@
 
 ## Active Completion Gaps
 
-- Phase 3 Release B is implemented in source but remains operationally incomplete until the target zero-count preflight, backup/restore, non-rolling V6 cutover, and smoke-test evidence succeeds.
-- Redis delayed-ZSET delivery is still non-atomic, and Phase 4 must finish crash/retry convergence plus bounded transient `PROCESS_UPLOAD` retries.
+- Phase 3 is complete for the current undeployed greenfield target. The first deployment migrates a fresh database through V6; the Release A-to-B runbook applies only to a future upgrade from existing pre-V6 data.
+- Phase 4 is complete for the approved backend scope. Crash/restart and Redis interruption proof, live SSE disconnect/resync, storage-side-effect idempotency auditing, and deployment-owned alert rules are implemented; broader dashboards remain a later observability phase.
 - Moderation transitions, strict asset cache headers, remaining-lifetime export presigns, and retention-purge multipart aborts remain Phase 6 work.
 
 ## Known Traps
@@ -98,7 +101,7 @@
   - This avoids test boot failures when no OAuth client is configured
 - `events` stores `share_token_hash`, `share_token_ciphertext`, and `share_token_key_id`; V6 removes recoverable plaintext.
 - Host `sharePath` always decrypts ciphertext, public lookup remains hash-based, and startup rejects a keyring missing any referenced database key ID.
-- Release A and Release B binaries are incompatible across V6; follow the coordinated cutover/restore runbook instead of rolling or down-migrating.
+- A greenfield deployment runs directly through V6 with maintenance flags disabled. If an existing pre-V6 environment is ever upgraded, Release A and Release B binaries remain incompatible across V6 and require the coordinated cutover/restore runbook.
 - `upload_intents.upload_token_hash` is still not used to authorize the local-storage binary upload endpoints
 - Public asset URLs are opaque tokens, but access is still checked against:
   - photo visibility

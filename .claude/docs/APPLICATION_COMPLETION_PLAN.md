@@ -50,9 +50,9 @@ Historical result: the forced backend test run passed 44 tests with no failures;
 - Production and worker-only local modes, unavailable required Redis, and conflicting canonical/legacy infrastructure settings now fail startup.
 - Security and controller errors use standardized ProblemDetails; liveness is process-focused and readiness includes the database plus mode-aware Redis health.
 - Phase 2 implementation was completed on 2026-07-17 with media-fixture, checksum, multipart, cleanup, presigner, production-validation, and S3-compatible storage tests written before runtime changes.
-- The full backend suite passes 137 tests with 0 failures/errors and 1 skipped opt-in live R2 test; `spotlessCheck` and the canonical `openApiCheck` pass. The production image was built and the exact libvips command was validated as the non-root runtime user.
-- Phase 3 Release A and both deployable Release B stages are implemented in source with tests written first. The target Release B maintenance-window cutover remains the Phase 3 completion gate.
-- Phase 4 is the next code phase after that cutover; its transactional outbox and pending-message recovery foundation already exists.
+- The full backend suite passes 149 tests with 0 failures/errors and 1 skipped opt-in live R2 test; `spotlessCheck` and the canonical `openApiCheck` pass. The production image was built and the exact libvips command was validated as the non-root runtime user.
+- Phase 3 Release A and Release B are implemented and complete for the current greenfield target. No release or application database has been deployed, so the first deployment migrates a fresh database directly through V6 with the configured keyring; legacy preflight/backfill/cutover steps are not pending prerequisites.
+- Phase 4 is complete for the approved backend scope. Child-process crash/restart and Redis-interruption proof, live multi-API SSE disconnect/resync, storage-side-effect idempotency auditing, queue gauges/handler histograms, and deployment-owned alert rules now complement the durable outbox/retry/DLQ runtime.
 - Phase 2's live-provider exit gate passed on 2026-07-17 using the replacement token loaded directly from the ignored `.env`. The live run exposed two covered regressions: provider multipart upload IDs now persist as opaque text through Flyway V3, and the smoke client JSON-encodes quoted provider ETags.
 - Phase 7 remains on hold.
 
@@ -150,7 +150,7 @@ Status: complete. Runtime behavior, local and S3-compatible contracts, productio
 
 ## Phase 3 - Lifecycle, Contracts, Pagination, and Encrypted Share Tokens
 
-**Status: implemented in source; target Release B cutover pending.** Release A is additive and rolling-compatible. Release B is an intentionally coordinated, non-rolling schema/runtime cutover. Theme and cover-photo contracts remain excluded until design approval.
+**Status: complete for the current undeployed greenfield target.** The first deployment runs Flyway through V6 on a fresh database with the configured encryption keyring and both maintenance flags disabled. Release A-to-B coordination is retained only as a future upgrade procedure for an environment that already contains pre-V6 data. Theme and cover-photo contracts remain excluded until design approval.
 
 ### Implemented Release A
 
@@ -174,39 +174,36 @@ Status: complete. Runtime behavior, local and S3-compatible contracts, productio
 - PostgreSQL migration tests cover V3-to-V5 compatibility, real AES-GCM V5-to-V6 data, every invalid V5 gate condition in isolated schemas, and physical plaintext-column removal. H2 covers clean V1-to-V6.
 - The canonical OpenAPI check reports no contract delta.
 
-### Deployment gate and exit criteria
+### Greenfield deployment status and future upgrade guard
 
-- Phase 3 is complete only after the target environment follows `.agents/docs/PHASE3_RELEASE.md`: zero-count SQL/application preflights, authoritative legacy close-time remediation, due-closure snapshots, verified backup/restore evidence, full Release A shutdown, single-worker V6 migration, smoke tests, and monitored traffic restoration.
-- Rollback after V6 is snapshot restore plus the Release A binary and full old keyring; there is no down migration or manual plaintext reconstruction.
+- There is no deployed Release A data to remediate, backfill, preflight, or preserve. Flyway applies V1 through V6 during initial database creation, and normal keyring validation protects subsequent starts.
+- Keep `APP_SHARE_TOKEN_BACKFILL_ENABLED=false` and `APP_SHARE_TOKEN_RELEASE_B_PREFLIGHT_ENABLED=false` for the first deployment and normal operation.
+- `.agents/docs/PHASE3_RELEASE.md` remains a conditional runbook only for a future upgrade from an existing pre-V6 database. Such an upgrade still requires its backup, preflight, coordinated cutover, and restore controls.
 
 ## Phase 4 - Durable Jobs and Realtime Convergence
 
-**Status: partially implemented and next after the Release B target cutover.** Transactional outbox publication, beginning-of-stream consumer groups, abandoned pending-message reclaim, delayed retries, a DLQ, idempotent handlers, and queue/worker metrics exist. Remaining work is atomic delayed delivery plus exhaustive crash/restart, retry-classification, and convergence proof.
+**Status: completed for the approved backend scope on 2026-07-20.** PostgreSQL is the durable source for initial and delayed work, Redis Streams provide at-least-once delivery, abandoned pending entries are reclaimed, transient work has bounded retries, terminal work is DLQ-visible, and deployment-owned rules alert on current queue/handler state.
 
-### Remaining tests first
+### Completion evidence
 
-- Prove Redis delayed delivery cannot lose a job between due selection and stream publication.
-- Simulate publish-success/mark-success crashes, duplicate publication, worker termination after delivery, and repeated process restarts; prove eventual completion through idempotent handlers.
-- Add bounded transient `PROCESS_UPLOAD` retry tests for storage, native command, and dependency failures while keeping invalid/corrupt media permanent.
-- Run multiple API instances and separate workers against shared PostgreSQL/Redis; verify SSE state convergence and REST resync after disconnection.
-- Assert actionable metrics/health for outbox age, pending count, retries, dead letters, handler duration, and terminal failures.
+- Removed the redundant Redis delayed ZSET/scheduler; `outbox_messages.available_at` is the sole durable delay source in every infrastructure mode.
+- Added explicit no-op production crash checkpoints plus a test-only halting implementation around outbox publication, stream delivery, handler commit, retry persistence, DLQ publication, and acknowledgement boundaries.
+- Added `phase4ProcessTest`, which launches API and worker roles as operating-system child JVMs against PostgreSQL and AOF-backed Redis. It proves outbox replay after a publish-before-commit halt, pending reclaim after a handler-commit-before-ack halt, readiness failure/recovery across Redis stop/start, and eventual publication/consumption of work held in PostgreSQL during the outage.
+- Fixed consumer-group restart bootstrap cleanup so `BUSYGROUP` cannot leave a malformed permanently pending stream entry; unexpected worker-loop failures are now visible in logs without acknowledging the record.
+- Corrected split-runtime test configuration precedence so separate API and worker contexts genuinely share PostgreSQL and Redis.
+- Added live HTTP SSE proof across two API instances: cross-instance `photo_ready`/moderation delivery, disconnect during a state change, REST feed resynchronization, reconnect, and subsequent live delivery.
+- Completed the storage-side-effect audit: deterministic media variant and export keys, pessimistic handler locks, prefix cleanup for orphanable variants/exports, and `NoSuchUpload` multipart-completion recovery only after `HEAD` confirms the final object.
+- Added current queue gauges, tagged handler-duration histograms, deployable Prometheus alerts, executable `promtool` rule tests, and CI validation. Broader dashboards remain later operational work outside the explicitly narrowed Phase 4 closure scope.
+- Documented proof, replay semantics, side-effect ownership, and operator expectations in `.agents/docs/PHASE4_RESILIENCE.md` and `.agents/docs/OPERATIONS_RUNBOOK.md`.
 
-### Remaining implementation
+### Exit criteria evidence
 
-- Replace the Redis delayed-ZSET due-read/remove sequence with an atomic move or an equivalent outbox-only scheduling path.
-- Preserve at-least-once outbox/stream semantics and make every side-effecting handler safe under duplicate publication and delivery.
-- Classify transient upload-processing failures for bounded exponential retry and DLQ/terminal visibility; keep media-validation failures non-retryable.
-- Expose stuck outbox, pending, retry, and dead-letter conditions through deployable alerts rather than logs alone.
-- Keep the in-process dispatcher only for explicit single-process local mode.
-
-### Exit criteria
-
-- Restart and crash tests demonstrate eventual completion without skipped committed work.
-- Duplicate delivery is harmless, delayed delivery is atomic, and transient work has bounded retries.
-- Operators can detect and diagnose stuck, retrying, terminal, or dead-lettered jobs.
+- Committed work is not skipped across forced process termination, duplicate publication, pending reclaim, or Redis interruption.
+- Duplicate delivery overwrites stable storage keys or performs idempotent cleanup; delayed work remains atomic in PostgreSQL.
+- SSE clients have tested cross-instance live hints and an authoritative REST resync path after disconnection.
+- Operators can detect stalled/high outbox state, pending work, retry storms, DLQ depth, terminal failures, publication failures, slow handlers, and missing metrics.
 
 ## Phase 5 - Authentication, OAuth, and Abuse Controls
-
 **Status: partially implemented.** Magic links, sessions, conditional Google OAuth, CSRF/CORS, and base rate limits exist; full integration coverage, safe frontend redirects, and risk-based challenge policy remain.
 
 ### Tests first
@@ -349,9 +346,7 @@ The application is complete for v1 when:
 
 ## Next Implementation Sequence
 
-1. Complete the documentation-only synchronization and verify canonical/mirror hashes and `.env` hygiene.
-2. Write the Phase 3 lifecycle, PATCH, cursor, ownership, migration, and encryption tests.
-3. Deliver Release A additively, run focused suites, then `./gradlew spotlessCheck test` and the OpenAPI/repository checks.
-4. Run the operational close-time and ciphertext backfills in the target environment.
-5. Deliver Release B only after its data gates pass; do not collapse the two migrations into one rollout.
-6. Continue with the remaining Phase 4-6 and backend-only Phase 0/8/9 deltas. Angular remains paused.
+1. Verify the current Phase 4 outbox-only delay, retry taxonomy, queue gauges, and guidance mirrors with the full backend/OpenAPI/repository checks.
+2. Add the process-level Redis/PostgreSQL crash-and-restart harness, then close any idempotency gaps it exposes.
+3. Add live multi-API SSE disconnect/resync proof plus deployable queue alert rules to complete Phase 4.
+4. Continue with Phases 5-6 and backend-only Phase 0/8/9 deltas. Angular remains paused.

@@ -1,10 +1,10 @@
-# Phase 3 Release Runbook
+# Phase 3 Greenfield Status and Conditional Pre-V6 Upgrade Runbook
 
-## Current status
+## Applicability and current status
 
-Release A and Release B are implemented in source, including the Release B readiness patch and Flyway V6. Phase 3 is not operationally complete until the coordinated Release B cutover succeeds in the target environment and its approval evidence is recorded.
+No release or application database has been deployed for the current target. Phase 3 is complete for this greenfield path: configure the same approved keyring on API and worker roles, keep both maintenance flags disabled, and let Flyway migrate the fresh database directly through V6 on the first deployment. No legacy preflight, backfill, maintenance window, or A-to-B cutover is pending.
 
-Release A is rolling-compatible. Release B is intentionally non-rolling: Release A binaries cannot run after V6 drops `share_token_value`, and Release B binaries cannot create events before V6 because the legacy plaintext column is still non-null.
+The remainder of this document is conditional. Use it only if a future environment already contains pre-V6 Release A data. In that case, Release A is rolling-compatible but Release B is intentionally non-rolling: Release A binaries cannot run after V6 drops `share_token_value`, and Release B binaries cannot create events before V6 because the legacy plaintext column is still non-null.
 
 ## Required configuration
 
@@ -18,7 +18,7 @@ Configure API and worker roles with the same deployment-approved keyring:
 
 Backfill and preflight are mutually exclusive; startup fails if both flags are enabled. Logs, evidence, tickets, and command output may contain aggregate counts and key IDs only. Never include raw tokens, ciphertext, share URLs, key bytes, or provider exception text.
 
-## Stage A: readiness patch and data gate
+## Existing pre-V6 data only: Stage A readiness patch and data gate
 
 1. Deploy the readiness patch to every Release A API and worker node.
 2. Start one controlled node with backfill enabled. It validates `SHA-256(recoveredToken) == share_token_hash` before encrypting or rotating each bounded batch. A mismatch, unknown key, missing material, or decryption failure aborts the transaction with a token-safe error.
@@ -32,7 +32,7 @@ Backfill and preflight are mutually exclusive; startup fails if both flags are e
 
 Any corrupt, undecryptable, hash-mismatched, or unknown-key row blocks the cutover. Recover it from authoritative data or the verified backup; never rotate it to a new raw token automatically.
 
-## Stage B: coordinated V6 cutover
+## Existing pre-V6 data only: Stage B coordinated V6 cutover
 
 1. Enable maintenance mode and stop every Release A API and worker node.
 2. Rerun the final SQL and application preflight against the frozen database.
@@ -49,6 +49,6 @@ V6 makes scheduled close time, ciphertext, and key ID non-null; rejects blank en
 
 Add the replacement key while retaining every old referenced key, switch the active ID, deploy all nodes, and run the bounded backfill. Post-B backfill selects only rows whose key ID differs from the active key and decrypts ciphertext only. Remove an old key only after its database row count is zero. Normal startup fails if any event references an absent key.
 
-## Rollback
+## Existing pre-V6 data only: rollback
 
 Before V6, roll back to the Release A readiness binary while retaining the full keyring. After V6 or the Release B binary fails, stop Release B, restore the identified pre-cutover database snapshot, and start the Release A binary with the full old keyring. Do not create a down migration, re-add `share_token_value`, or reconstruct plaintext manually.
