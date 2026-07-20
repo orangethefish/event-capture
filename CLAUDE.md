@@ -224,6 +224,10 @@
 
 - Run tests:
   - `cd backend && ./gradlew test`
+- Bitbucket Pipelines runs the container-backed integration suites with Docker and
+  `TESTCONTAINERS_RYUK_DISABLED=true`, because Bitbucket does not permit Testcontainers'
+  privileged Ryuk resource-reaper container. The verification step builds and shares the
+  `bootJar` output as `build/libs/*.jar` for the separate Docker-image step.
 - Compile only:
   - `cd backend && ./gradlew compileJava`
 - Start app locally:
