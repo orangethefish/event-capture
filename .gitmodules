@@ -1,3 +1,6 @@
 [submodule "backend"]
 	path = backend
 	url = git@bitbucket.org:orangethefish/event-capture-backend.git
+[submodule "frontend"]
+	path = frontend
+	url = git@bitbucket.org:orangethefish/event-capture-frontend.git
