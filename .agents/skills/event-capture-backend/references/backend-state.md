@@ -51,17 +51,21 @@
 - `PROCESS_UPLOAD` retries transient storage, native-command, and dependency failures with bounded exponential backoff while invalid/corrupt media and invalid job targets remain permanent
 - Host moderation endpoints
 - Async export job creation, status lookup, signed/local download URLs, and expired-download enforcement
-- Flyway schema for all core domain tables plus V7 magic-link return paths
+- Flyway schema for all core domain tables through V8, including magic-link return paths and deleted-visibility/timestamp consistency
 - Operation-aware local/Redis rolling-window abuse enforcement with HMAC-only subjects, Turnstile clearance, trusted-proxy client IP resolution, safe `403`/`429`/`503` metadata, and fail-closed production behavior
 - Storage abstraction for local filesystem and Cloudflare R2
 - Redis Streams worker jobs with outbox-backed delayed retries and a dead-letter stream
 - Current gauges for unpublished outbox count/age, pending stream entries, and DLQ depth, plus retry/failure/claim counters and tagged handler-duration histograms
 - Worker maintenance cleanup for deleted photos, retained events, expired exports, and expired upload intents
+- Pessimistic moderation/processing/purge state transitions with idempotent actions, immutable first deletion time, and terminal deletion
+- Strict public-asset GET/HEAD privacy headers on success and denial with backend-authorized immediate revocation
+- Retention-bound export archives/presigns, deterministic all-non-deleted-original contents, terminal duplicate delivery, and retry taxonomy
+- Locked per-item cleanup transactions with abort-before-delete retained-event recovery and cleanup-type failure metrics
 - MockMvc integration tests for host auth, event flows, guest uploads, gallery visibility, moderation, cleanup, Redis-backed sessions, and worker-driven processing
 - Split-runtime integration tests for separate `api` and `worker` contexts on genuinely shared PostgreSQL and Redis, including real cross-instance HTTP SSE disconnect/REST-resync/reconnect proof
 - Local-runtime integration tests for Redis-free auth/session/CSRF/logout, CORS, ProblemDetails, and health groups
 - OS-process Phase 4 tests for outbox publish-before-commit crash replay, handler-commit-before-ack reclaim, duplicate drain, and AOF-backed Redis stop/start while API and worker JVMs remain alive
-- Deployable Prometheus alert rules and executable `promtool` tests for current queue and handler meters
+- Deployable Prometheus alert rules and executable `promtool` tests for queue/handler meters, terminal exports, and provider cleanup failures
 - Startup tests for production/worker local-mode rejection, contradictory settings, and unavailable required Redis
 - Unit tests proving magic-link logs omit tokens/URLs and export ZIP names are traversal-safe
 - Broker unit tests for `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted` emitter delivery
@@ -86,10 +90,10 @@
 
 ## Active Completion Gaps
 
-- Phase 3 is complete for the current undeployed greenfield target. The first deployment migrates a fresh database through V6; the Release A-to-B runbook applies only to a future upgrade from existing pre-V6 data.
+- Phase 3 is complete for the current undeployed greenfield target. The first deployment migrates a fresh database through V8; the Release A-to-B runbook applies only to a future upgrade from existing pre-V6 data.
 - Phase 4 is complete for the approved backend scope. Crash/restart and Redis interruption proof, live SSE disconnect/resync, storage-side-effect idempotency auditing, and deployment-owned alert rules are implemented; broader dashboards remain a later observability phase.
 - Phase 5 is complete. Browser magic links, verified Google OIDC, session fixation protection, distributed abuse policy, Turnstile, proxy trust, API-only provider configuration, and production validation are covered by unit, HTTP, PostgreSQL, Redis, and embedded-OIDC tests.
-- Moderation transitions, strict asset cache headers, remaining-lifetime export presigns, and retention-purge multipart aborts remain Phase 6 work.
+- Phase 6 runtime work is implemented. Docker-backed PostgreSQL/Redis/MinIO, Phase 4 process, OpenAPI, production-configuration, and `promtool` exit gates remain before the phase can be marked complete.
 
 ## Known Traps
 
@@ -103,7 +107,7 @@
 - Forwarded client IPs are trusted only from configured proxy CIDRs. Forwarded host/protocol values never generate email links or OAuth callbacks.
 - `events` stores `share_token_hash`, `share_token_ciphertext`, and `share_token_key_id`; V6 removes recoverable plaintext.
 - Host `sharePath` always decrypts ciphertext, public lookup remains hash-based, and startup rejects a keyring missing any referenced database key ID.
-- A greenfield deployment runs directly through V7 with maintenance flags disabled. If an existing pre-V6 environment is ever upgraded, Release A and Release B binaries remain incompatible across V6 and require the coordinated cutover/restore runbook.
+- A greenfield deployment runs directly through V8 with maintenance flags disabled. If an existing pre-V6 environment is ever upgraded, Release A and Release B binaries remain incompatible across V6 and require the coordinated cutover/restore runbook.
 - `upload_intents.upload_token_hash` is still not used to authorize the local-storage binary upload endpoints
 - Public asset URLs are opaque tokens, but access is still checked against:
   - photo visibility

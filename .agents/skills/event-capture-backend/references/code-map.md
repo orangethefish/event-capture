@@ -47,16 +47,24 @@
   - `backend/src/main/java/com/eventcapture/backend/media/UploadService.java`
   - `backend/src/main/java/com/eventcapture/backend/media/MediaProcessingService.java`
   - `backend/src/main/java/com/eventcapture/backend/media/NativeSourceImageDecoder.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/DeletedPhotoCleanupService.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/UploadIntentCleanupService.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/UploadIntentCleanupItemService.java`
   - `backend/src/main/java/com/eventcapture/backend/infra/storage/LocalStorageService.java`
   - `backend/src/main/java/com/eventcapture/backend/infra/storage/R2ObjectStorageService.java`
 - Gallery and SSE:
   - `backend/src/main/java/com/eventcapture/backend/gallery/GalleryService.java`
   - `backend/src/main/java/com/eventcapture/backend/gallery/GalleryEventBroker.java`
   - `backend/src/main/java/com/eventcapture/backend/gallery/GalleryEventRedisConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/gallery/PublicAssetPrivacyFilter.java`
 - Moderation:
   - `backend/src/main/java/com/eventcapture/backend/moderation/ModerationService.java`
 - Export:
   - `backend/src/main/java/com/eventcapture/backend/export/ExportService.java`
+  - `backend/src/main/java/com/eventcapture/backend/export/ExportArchiveService.java`
+  - `backend/src/main/java/com/eventcapture/backend/export/ExportArchiveCleanupService.java`
+  - `backend/src/main/java/com/eventcapture/backend/export/ExportArchiveCleanupItemService.java`
+  - `backend/src/main/java/com/eventcapture/backend/observability/Phase6Metrics.java`
 
 ## Persistence
 
@@ -78,6 +86,7 @@
   - `backend/src/main/resources/db/migration/V6__phase3_release_b.sql`
   - `backend/src/main/resources/db/migration/V7__phase5_authentication.sql`
 
+  - `backend/src/main/resources/db/migration/V8__phase6_privacy.sql`
 ## Tests
 
 - Main integration coverage:
@@ -94,6 +103,7 @@
   - `backend/src/test/java/com/eventcapture/backend/integration/Phase5MagicLinkIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/MagicLinkConcurrencyIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/GoogleOAuthFlowIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/ModerationConcurrencyIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/RedisAbuseStoreIntegrationTest.java`
 - Unit coverage:
   - `backend/src/test/java/com/eventcapture/backend/event/EventServiceTest.java`

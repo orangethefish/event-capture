@@ -36,10 +36,10 @@
   - `photo_variants`
   - `moderation_actions`
   - `export_jobs`
-- Host magic-link auth with session-backed host access.
-- Conditional Google OAuth success handling. OAuth login wiring only activates if a `ClientRegistrationRepository` exists.
+- Host magic-link auth with JSON consume compatibility, a browser-oriented token-free `303` completion flow, persisted allowlisted return paths, exact expiry, pessimistic replay protection, normalized `MAGIC_LINK` identities, and centralized session-fixation rotation.
+- Conditional Google OAuth uses Spring Security authorization-code/state processing, shared-session state-bound return paths, verified `sub`/email claims, first-login verified-email linking, safe failure codes, and centralized session establishment. OAuth wiring activates only for a complete Google client configuration.
 - CSRF cookie/header support for host endpoints, with both `GET /api/v1/auth/csrf` and canonical `GET /api/v1/csrf`.
-- Credentialed CORS is restricted to `APP_FRONTEND_ORIGIN` and allows the canonical `X-XSRF-TOKEN` header required by `CookieCsrfTokenRepository`.
+- Credentialed CORS is restricted to `APP_FRONTEND_ORIGIN`, allows `X-XSRF-TOKEN` and `X-Challenge-Token`, and exposes `Retry-After` and `X-Correlation-ID`.
 - Security-filter and controller-advice failures use standardized `application/problem+json` responses.
 - Magic-link delivery logs never include the live URL or token; SMTP failures return a safe `502` error.
 - Export archive entry names are normalized to traversal-safe basenames with deterministic duplicate suffixes.
@@ -51,7 +51,7 @@
 - Share tokens are persisted only as a SHA-256 lookup hash plus AES-256-GCM ciphertext and key ID. Host share paths decrypt the original token; public lookup remains hash-based and existing API paths/shapes are unchanged.
 - The optional Release B preflight scans events in bounded UUID-keyset batches and safely reports missing encryption data, unknown keys, decryption/hash failures, missing closes, and invalid windows. Backfill and preflight cannot run together.
 - Post-B backfill performs ciphertext-only key rotation, and normal startup rejects any database key ID absent from the configured API/worker keyring.
-- Flyway V6 enforces non-null close/ciphertext/key ID fields, nonblank encrypted fields, ordered upload windows, and physical removal of `share_token_value`. No release or application data has been deployed, so Phase 3 is complete for the greenfield first deployment: Flyway can migrate a fresh database directly through V6. The coordinated cutover applies only to a future upgrade from a pre-V6 environment.
+- Flyway V6 enforces non-null close/ciphertext/key ID fields, nonblank encrypted fields, ordered upload windows, and physical removal of `share_token_value`. Flyway V7 adds the validated magic-link return path, and V8 requires `deletedAt` exactly for `DELETED` photos. No release or application data has been deployed, so the greenfield first deployment migrates directly through V8; the coordinated V6 cutover applies only to a future upgrade from a pre-V6 environment.
 - SSE fan-out uses local in-process delivery in explicit `local` infrastructure mode and Redis pub/sub propagation in explicit `redis` mode.
 - Upload validation for allowed content types and size limits.
 - Storage abstraction with:
@@ -59,7 +59,7 @@
   - Cloudflare R2-backed storage using AWS SDK for Java v2
 - UUID generation uses UUIDv7-style ordered IDs through `uuid-creator`.
 - Host sessions use an in-memory `MapSessionRepository` in explicit `local` mode and `RedisSessionRepository` in explicit `redis` mode. Spring Session auto-configuration is disabled so selection is deterministic.
-- Rate limiting selects the in-memory implementation in `local` mode and Redis-backed counters in `redis` mode.
+- Operation-aware abuse enforcement uses exact in-memory rolling windows in `local` mode and atomic Redis rolling windows in `redis` mode. Counter and clearance subjects are HMACed; hard caps, risk challenges, 15-minute Turnstile clearance, and safe retry metadata are enforced consistently across modes.
 - Upload init and multipart part responses now include `requiredHeaders` for direct-to-storage uploads.
 - R2-backed single-part and multipart upload preparation is implemented:
   - single-part upload init returns a presigned upload URL
@@ -82,6 +82,10 @@
 - Native media commands have a 60-second timeout and bounded diagnostic output.
 - The media variant pipeline is selected through `APP_MEDIA_PROCESSOR=java|libvips`: Java remains the portable local/test fallback, while production Compose selects libvips for bounded auto-rotating, metadata-stripping re-encoding. Production images include `libvips-tools`, HEIF, and WEBP helpers.
 - Export jobs are now executed asynchronously and can return a signed or local download URL once `READY`. Duplicate builds take a pessimistic export-job lock, use a deterministic archive key, and remove that key on terminal failure even if its database path did not commit.
+- Phase 6 moderation uses one pessimistic photo lock across moderation, media processing, and deleted-photo purge. Only `VISIBLE -> HIDDEN`, `HIDDEN -> VISIBLE`, and `VISIBLE|HIDDEN -> DELETED` change state; repeated actions are no-op `204` responses, deletion is terminal, and the first `deletedAt` remains immutable.
+- Public asset delivery applies `no-store`, `no-cache`, zero-age, `Pragma`, `Expires`, and `nosniff` headers through an API-role filter for every GET/HEAD success or error. Hidden, deleted, non-ready, gallery-disabled, retention-expired, purged, and unknown assets remain indistinguishable `404` responses.
+- Phase 6 exports include every non-deleted finalized original regardless of visibility or processing outcome, order entries by `(createdAt, id)`, retain safe deterministic ZIP names, reject creation after retention expiry, and cap archive/presign lifetime by both archive and event-retention deadlines. ZIP reads use attachment, private/no-store, and `nosniff` response controls.
+- Phase 6 cleanup locks eligible rows, aborts all incomplete multipart uploads before retained-event object deletion, preserves database state on provider failure, and cleans expired export archives/upload intents one locked item per transaction while later items continue.
 - Public feeds can build asset URLs from `APP_STORAGE_PUBLIC_BASE_URL` outside production. Production rejects a non-empty public base URL and uses backend-authorized asset reads so strict hide/delete/disable/expiry revocation cannot be bypassed by an old CDN object URL.
 - Public asset reads and export reads stream through the storage abstraction instead of reading directly from the filesystem.
 - Unit tests covering `EventService`, `AuthService`, `GuestSessionService`, `SimpleRateLimiter`, `UploadService`, and `R2ObjectStorageService`.
@@ -90,9 +94,10 @@
 - `GalleryEventBrokerTest` covers `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted` emitter payload delivery.
 - `phase4ProcessTest` launches child API/worker JVMs against PostgreSQL and AOF-backed Redis, proving outbox replay after publish-before-commit termination, pending reclaim after handler-commit-before-ack termination, and recovery of readiness/publication/consumption across Redis stop/start.
 - The storage-side-effect audit covers deterministic media/export keys, pessimistic handler locks, orphan-prefix cleanup, and uncertain multipart-completion recovery.
-- Deployment-owned Prometheus rules and executable `promtool` tests cover outbox stall/backlog, pending work, retries, DLQ depth, terminal/publish failures, p95 handler latency, and missing queue metrics. Bitbucket and Jenkins validate them with pinned Prometheus `v3.5.0`.
-- A MinIO Testcontainers suite exercises the R2 adapter contract through real S3-compatible HTTP for presigned single-part upload, multipart completion, abort, head/read/write, export reads, and prefix cleanup.
-- The complete backend verification passes 154 standard tests with 0 failures/errors and 1 skipped opt-in live R2 test, plus the child-process Phase 4 recovery test and the OpenAPI contract test; `spotlessCheck` passes, and the separately enabled live R2 smoke test passes against Cloudflare.
+- Deployment-owned Prometheus rules and executable `promtool` tests cover outbox stall/backlog, pending work, retries, DLQ depth, terminal/publish failures, p95 handler latency, missing queue metrics, terminal exports, and provider cleanup failures by cleanup type. Bitbucket and Jenkins validate them with pinned Prometheus `v3.5.0`.
+- A MinIO Testcontainers suite exercises the R2 adapter contract through real S3-compatible HTTP for presigned single-part upload, multipart completion, abort, head/read/write, retention-aware signed export GET duration/response overrides, export reads, and prefix cleanup.
+- Phase 5 tests include browser magic-link/session behavior, PostgreSQL concurrent replay, an embedded signed OIDC provider, every balanced abuse threshold, Redis cross-instance counters/clearance, Turnstile classification, trusted proxy chains, CORS, and production configuration validation.
+- Phase 6 has a green 39-test focused non-container suite plus successful compilation and formatting. Docker is currently unavailable locally, so the full PostgreSQL/Redis/MinIO suite, Phase 4 child-process recovery, `promtool`, OpenAPI, and production-configuration exit gates remain mandatory before Phase 6 may be marked complete.
 - The live R2 test verifies direct single-part and multipart upload, asynchronous processing, export generation/read, incomplete-upload cleanup, and retention cleanup without exposing signed URLs or credentials. Provider-issued multipart upload IDs are stored as opaque text, and quoted provider ETags are JSON-encoded as opaque values.
 
 ### Intentionally Temporary
@@ -101,7 +106,7 @@
 - Metadata stripping is achieved through public-variant re-encoding (`strip` in libvips) rather than a separate metadata service.
 - Production deliberately serves media through authorized backend asset endpoints for strict revocation. Direct CDN/custom-domain delivery remains disabled until a revocation-safe edge strategy is implemented.
 - Cleanup scheduling is simple and currently relies on periodic scans plus idempotent job handlers rather than explicit deduplication state.
-- Local infrastructure is intentionally process-local and non-durable: sessions, rate limits, gallery events, and background jobs are lost on restart and cannot coordinate multiple instances.
+- Local infrastructure is intentionally process-local and non-durable: sessions, abuse counters/clearance, gallery events, and background jobs are lost on restart and cannot coordinate multiple instances.
 - Backend `PUT` upload binary endpoints still exist for `local` storage mode. The intended production path is presigned direct upload to R2.
 - Phase 4 is complete for the approved backend scope: transactional outbox/delays, reclaim/retries/DLQ, child-process crash/restart and Redis-interruption proof, live multi-API SSE disconnect/resync proof, storage-side-effect idempotency auditing, and deployment-owned alerts are implemented. Broader dashboards remain later observability work.
 
@@ -131,6 +136,15 @@
 - Auth:
   - `backend/src/main/java/com/eventcapture/backend/auth/AuthController.java`
   - `backend/src/main/java/com/eventcapture/backend/auth/AuthService.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/HostSessionAuthenticationService.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/FrontendRedirectPolicy.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/StateAwareAuthorizationRequestRepository.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/OAuth2LoginSuccessHandler.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/OAuth2LoginFailureHandler.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/AuthConfigurationValidator.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/AbuseProtectionService.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/ClientIpResolver.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/TurnstileChallengeVerifier.java`
 - Events:
   - `backend/src/main/java/com/eventcapture/backend/event/Event.java`
   - `backend/src/main/java/com/eventcapture/backend/event/EventService.java`
@@ -170,6 +184,8 @@
   - `backend/src/main/resources/db/migration/V4__phase3_release_a.sql`
   - `backend/src/main/resources/db/migration/V5__transactional_outbox.sql`
   - `backend/src/main/resources/db/migration/V6__phase3_release_b.sql`
+  - `backend/src/main/resources/db/migration/V7__phase5_authentication.sql`
+  - `backend/src/main/resources/db/migration/V8__phase6_privacy.sql`
 - Tests:
   - `backend/src/test/java/com/eventcapture/backend/integration/BackendIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/DistributedRuntimeIntegrationTest.java`
@@ -186,6 +202,7 @@
   - `backend/src/test/java/com/eventcapture/backend/media/UploadServiceTest.java`
   - `backend/src/test/java/com/eventcapture/backend/media/UploadServicePhase2Test.java`
   - `backend/src/test/java/com/eventcapture/backend/media/MediaInspectionServiceTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/ModerationConcurrencyIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/media/LibvipsMediaVariantProcessorTest.java`
   - `backend/src/test/java/com/eventcapture/backend/media/NativeSourceImageDecoderTest.java`
   - `backend/src/test/java/com/eventcapture/backend/gallery/PublicAssetUrlBuilderTest.java`
@@ -198,12 +215,17 @@
 
 - `POST /api/v1/auth/magic-link/request`
 - `GET /api/v1/auth/magic-link/consume`
+- `GET /api/v1/auth/magic-link/complete`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/csrf`
 - `GET /api/v1/auth/csrf`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/oauth2/authorization/google`
 - `GET /login/oauth2/code/google`
+- Current contract notes:
+  - magic-link requests accept optional allowlisted `returnPath`; browser completion returns a token-free `303` success/failure redirect with `no-store` and `no-referrer`
+  - challenge-required `403` responses expose only provider, site key, and action; abuse `429` responses include `Retry-After` and `retryAfterSeconds`
+  - Google OAuth remains absent unless client ID, client secret, and redirect URI form a complete configuration
 
 ### Host
 
@@ -219,8 +241,10 @@
 - `GET /api/v1/host/events/{eventId}/exports/{exportId}`
 - `GET /api/v1/host/events/{eventId}/exports/{exportId}/download`
 - Current contract notes:
+  - event responses expose `lifecycleState`, closure snapshot, applied retention days, `retentionExpiresAt`, `galleryEnabled`, and `galleryAvailable`; these fields are the host-settings privacy contract
+  - export creation returns RFC 9457 `410 Gone` after event retention expiry
   - expired exports no longer expose `downloadUrl`
-  - export download returns `410 Gone` after `archiveExpiresAt`
+  - export download returns `410 Gone` after `archiveExpiresAt`; successful ZIP responses use attachment, private/no-store, and `nosniff` headers
 
 ### Public
 
@@ -286,6 +310,12 @@
   - `APP_SESSION_NAMESPACE`
   - `APP_SESSION_TTL`
   - `APP_SESSION_SECURE_COOKIES`
+  - `APP_AUTH_SUCCESS_PATH` with deprecated `APP_OAUTH_SUCCESS_PATH` fallback, `APP_AUTH_FAILURE_PATH`, and `APP_AUTH_ALLOWED_RETURN_PATH_PREFIXES`
+  - `APP_AUTH_DEBUG_TOKEN_EXPOSURE=false` by default
+  - `APP_HTTP_TRUSTED_PROXY_CIDRS`
+  - `APP_ABUSE_KEY_SECRET` and typed `APP_ABUSE_OPERATIONS_*` thresholds
+  - `APP_TURNSTILE_SITE_KEY`, `APP_TURNSTILE_SECRET`, `APP_TURNSTILE_EXPECTED_HOSTNAME`, verification URL, and timeout
+  - `APP_MAIL_FROM`, `APP_SMTP_*` transport settings/timeouts, and optional complete `APP_GOOGLE_*` OAuth settings
   - `APP_SHARE_TOKEN_ACTIVE_KEY_ID`
   - `APP_SHARE_TOKEN_KEYRING` from the deployment secret store, retaining every referenced key ID
   - `APP_SHARE_TOKEN_BACKFILL_ENABLED=false` except for a controlled backfill/rotation node
@@ -306,11 +336,13 @@
   - optional `APP_STORAGE_R2_PRESIGN_TTL`
 - Production R2 startup validates private/backend delivery, bucket, credentials, account/HTTPS endpoint, minimum 5 MiB multipart parts, and a positive presign TTL no longer than seven days.
 - Restrictive direct-upload CORS is documented in `.agents/docs/R2_DEPLOYMENT.md`; `backend/r2-cors.example.json` allows only the configured frontend origin, `PUT`, required signed headers, and exposed `ETag`.
+- `APP_STORAGE_R2_PRESIGN_TTL` is the maximum for upload presigns and export download presigns; export URLs may be shorter when archive or event-retention lifetime is lower.
 - The opt-in live R2 smoke test is enabled with `EVENT_CAPTURE_LIVE_R2_SMOKE=true` and reuses the existing `APP_STORAGE_*` R2 variables.
 
 ## Next Likely Work
 
-- Preserve the completed Phase 4 child-process, Redis-interruption, live SSE resync, storage-idempotency, and alert-rule gates while continuing Phases 5-6 and later backend operational work.
-- Use `.agents/docs/PHASE3_RELEASE.md` only if a future environment must upgrade existing pre-V6 data. The current undeployed greenfield environment migrates directly through V6 with the configured keyring and both maintenance flags disabled.
-- Preserve the completed Phase 1 through Phase 3 runtime/security contracts and keep the full backend and OpenAPI checks passing after every backend phase.
+- Finish the Docker-backed Phase 6 exit gates: full PostgreSQL/Redis/MinIO tests, Phase 4 process recovery, OpenAPI, production configuration, and Prometheus rule checks. Do not mark Phase 6 complete before those gates pass.
+- After Phase 6 verification closes, the next backend work is the Phase 8/9 delivery-confidence gap set. Angular Phase 7 remains paused until the product owner approves the wireframe and design.
+- Use `.agents/docs/PHASE3_RELEASE.md` only if a future environment must upgrade existing pre-V6 data. The current undeployed greenfield environment migrates directly through V8 with the configured keyring and both maintenance flags disabled.
+- Preserve the completed Phase 1 through Phase 5 runtime, security, resilience, auth, and abuse gates; keep the full backend, OpenAPI, and Phase 4 process checks passing after every backend phase.
 - Do not scaffold or implement the Angular frontend until the product owner explicitly approves the completed wireframe and design; backend work may continue meanwhile.

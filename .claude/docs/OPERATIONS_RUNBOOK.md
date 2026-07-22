@@ -25,8 +25,12 @@ Jobs and gallery notifications are committed to `outbox_messages` with domain st
 - `eventcapture_jobs_dead_letters_current`
 - `eventcapture_jobs_handler_duration_seconds_bucket` by `job_type` and `outcome`
 - `eventcapture_jobs_terminal_failures_total`
+- `eventcapture_exports_requested_total`
+- `eventcapture_exports_completed_total`
+- `eventcapture_exports_failed_total`
+- `eventcapture_cleanup_provider_failures_total` by `cleanup_type`
 
-Import `backend/deploy/prometheus/event-capture-alerts.yml` into the deployment monitoring stack. CI validates both that file and `event-capture-alerts.test.yml` with pinned Prometheus `v3.5.0`. The rules cover outbox stall/backlog, pending work, retry storms, DLQ depth, terminal failures, publish failures, p95 handler latency, and missing metrics. Threshold changes belong to deployment review and must keep the executable rule tests current.
+Import `backend/deploy/prometheus/event-capture-alerts.yml` into the deployment monitoring stack. CI validates both that file and `event-capture-alerts.test.yml` with pinned Prometheus `v3.5.0`. The rules cover outbox stall/backlog, pending work, retry storms, DLQ depth, terminal failures, publish failures, p95 handler latency, missing metrics, terminal export failures, and provider cleanup failures by type. Threshold changes belong to deployment review and must keep the executable rule tests current.
 A publish-success/mark-success crash may duplicate delivery; handlers are required to be idempotent. Delays remain in PostgreSQL `outbox_messages.available_at` until due, and Redis receives only immediate stream records. Consumer groups start at the beginning of the stream, and idle pending entries are reclaimed before new polling so recovery cannot be starved by steady traffic. Do not acknowledge a record manually until its domain handler state has been verified. SSE is a state-change hint; clients resynchronize from the REST feed after reconnect. The live split-runtime test proves disconnect, REST resync, and reconnect across two Redis-backed API instances.
 
 For an incident, inspect unpublished outbox age/count, Redis group/pending state, the DLQ stream, and the target photo/export/purge state using correlation IDs. Restore Redis service and workers before replaying. Do not delete pending/outbox rows to make dashboards green.
@@ -40,7 +44,7 @@ Before schema enforcement releases, take a provider-native snapshot plus a logic
 
 ## Phase 3 greenfield deployment and future pre-V6 upgrades
 
-No release or application database has been deployed for the current target. The first deployment creates a fresh database and lets Flyway apply V1 through V6 directly. Supply the configured keyring to API and worker nodes, and keep both `APP_SHARE_TOKEN_BACKFILL_ENABLED=false` and `APP_SHARE_TOKEN_RELEASE_B_PREFLIGHT_ENABLED=false`. There is no legacy data to backfill, preflight, or cut over.
+No release or application database has been deployed for the current target. The first deployment creates a fresh database and lets Flyway apply V1 through V8 directly. Supply the configured keyring to API and worker nodes, and keep both `APP_SHARE_TOKEN_BACKFILL_ENABLED=false` and `APP_SHARE_TOKEN_RELEASE_B_PREFLIGHT_ENABLED=false`. There is no legacy data to backfill, preflight, or cut over.
 
 After migration, verify readiness, create a new event, retrieve its host share path, resolve it publicly, join as a guest, and verify `events.share_token_value` is absent. Monitor decryption failures, host-event 5xx responses, readiness, and Flyway logs.
 
@@ -52,12 +56,22 @@ If a future environment already contains pre-V6 Release A data, Release B remain
 
 R2 originals remain private and are the export source of truth until retention/deletion cleanup. Public variants can be regenerated from retained originals. Export archives are disposable and can be rebuilt while their source event is retained. Provider cleanup failures must leave database rows for retry. Retention purge aborts incomplete multipart uploads before deleting prefixes and domain rows. Media variants and exports use deterministic keys plus pessimistic handler locks; terminal and retention cleanup deletes deterministic prefixes so pre-commit storage writes cannot become unaddressable. A repeated R2 multipart completion accepts `NoSuchUpload` only when `HEAD` confirms the final object.
 
+Export archives expire at the earlier of build completion plus 24 hours or event retention. Each R2 signed GET is shorter when configured presign TTL, remaining archive lifetime, or remaining retention lifetime requires it. Missing originals and expired retention are permanent export failures; storage/network/5xx failures retain the existing five-attempt backoff.
+
+Expired archives and upload intents are processed one locked transaction at a time. If a provider call fails, restore provider access and allow the next scan to retry the same deterministic key; later due items continue independently. Use only identifier-safe logs and the cleanup-type metric. Do not remove the retained row manually. The full recovery checklist is in `.agents/docs/PHASE6_PRIVACY.md`.
+
 Exercise throttling, denied credentials, missing objects, multipart abort idempotency, and the opt-in live-R2 workflow. Never enable a public base URL in production until an edge design preserves hide/delete/disable/expiry revocation.
 
 ## Auth and external providers
 
-In staging, verify SMTP failure redaction, magic-link expiry/replay, Google consent denial/callback failure, the configured frontend success route, secure/SameSite cookies behind the production proxy/TLS topology, and session fixation/rolling TTL. Turnstile secrets are required only when `APP_CHALLENGE_MODE=turnstile`; normal traffic remains unchallenged and challenged traffic fails closed.
+Production API nodes require explicit HTTPS base/frontend URLs, secure host and guest cookies, SMTP host/from/timeouts, Turnstile site/secret/hostname settings, trusted-proxy CIDRs, and a deployment-specific abuse HMAC secret. Google OAuth is optional, but its ID, secret, and explicit HTTPS callback URI are all-or-nothing. Provider credentials belong only on API nodes; do not pass them to workers.
+
+Before release, render `backend/compose.prod.yml` with non-secret fixtures, then smoke the deployed API through its real TLS proxy. Verify the browser magic-link `303` success and fixed failure routes, token-free destinations, `no-store`/`no-referrer`, inclusive expiry, single-use replay rejection, pre-authentication session rotation, Redis rolling TTL, logout, CSRF, and `HttpOnly; Secure; SameSite=Lax; Path=/` host/guest cookies. Confirm the XSRF cookie is Secure and intentionally JavaScript-readable.
+
+For Google, verify consent success and denial, callback failure, state rejection, first-login verified-email linking, subsequent `sub` login, and callback completion on a different API instance. Never expose provider error descriptions. For Turnstile, exercise an operation-specific challenged request, invalid token, hostname/action mismatch, provider outage, 15-minute shared clearance, and hard-cap precedence. Provider outage must return retryable `503`; hard denial must return `429` with a conservative `Retry-After`.
+
+Validate the proxy trust boundary with a known client address: forwarded chains are honored only when the socket peer is in `APP_HTTP_TRUSTED_PROXY_CIDRS`, and canonical email/OAuth URLs always come from configured base/callback URLs. Inspect Redis keys only by prefix/count; identifiers are HMACed and raw IPs, emails, event IDs, guest IDs, session IDs, tokens, secrets, and provider responses must not be logged.
 
 ## Observability and privacy
 
-Every HTTP response includes `X-Correlation-ID`; safe caller-provided IDs are preserved and unsafe values are replaced. Logs and metrics must never contain share tokens, magic-link tokens, encryption keys/ciphertext, presigned URLs, cookies, SMTP/OAuth secrets, or raw challenge tokens. Public assets use backend authorization with `no-store`, zero-cache, and `nosniff` headers.
+Every HTTP response includes `X-Correlation-ID`; safe caller-provided IDs are preserved and unsafe values are replaced. Logs and metrics must never contain share tokens, magic-link tokens, encryption keys/ciphertext, presigned URLs, cookies, SMTP/OAuth secrets, filenames, or raw challenge tokens. Public assets use backend authorization with `no-store`, `no-cache`, zero-age, `Pragma`, `Expires`, and `nosniff` headers on GET/HEAD success and denial.

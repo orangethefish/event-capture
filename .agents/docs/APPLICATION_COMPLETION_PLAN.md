@@ -227,26 +227,30 @@ Angular remains paused, so HTTP integration tests emulate browser behavior; real
 
 ## Phase 6 - Privacy, Moderation, Delivery, and Exports
 
-**Status: partially implemented.** Authorized asset reads, moderation endpoints, exports, and cleanup exist; state-machine, cache-header, lifetime-bound presign, multipart-purge, and partial-failure gaps remain.
+**Status: runtime implemented; Docker-backed exit verification pending.** The focused non-container Phase 6 suite, compilation, and formatting pass. Docker is unavailable locally, so PostgreSQL/Redis/MinIO, Phase 4 process recovery, and containerized Prometheus verification remain required before this phase is marked complete.
 
-### Tests first
+### Implemented evidence
 
-- Test backend-authorized asset access before and after hide, unhide, delete, gallery disablement, retention expiry, and purge, including `no-store`, zero-cache, and `nosniff` headers.
-- Test cache headers and URL expiry so previously known URLs follow the approved revocation policy.
-- Test export authorization, state transitions, safe naming, originals-only contents, deleted/foreign photo exclusion, signed download expiry, `410 Gone`, archive cleanup, and repeated requests.
-- Test retention cleanup idempotency and partial provider failures.
+- Pessimistic photo locks serialize moderation, processing, and purge; tests cover the transition matrix, idempotence, immutable first `deletedAt`, terminal deletion, and PostgreSQL races.
+- The API-role asset filter applies identical strict privacy headers to GET/HEAD success and error responses; backend authorization preserves immediate hide/disable/expiry revocation.
+- Exports include all non-deleted finalized originals in deterministic order, reject creation after retention expiry, bind archive expiry to retention, cap R2 GET signatures by remaining lifetime, and protect `READY` from stale failure delivery.
+- Retained-event cleanup aborts every incomplete multipart upload before object deletion. Expired archives/uploads use locked item transactions, recheck eligibility, retain failed rows, and continue later items.
+- Transition-only export counters, cleanup-type failure counters, identifier-safe logs, Prometheus alerts, and executable rule tests are present.
+- Detailed transition tables, cache policy, deadline formulas, retry taxonomy, and recovery steps are recorded in `.agents/docs/PHASE6_PRIVACY.md`.
 
-### Implementation
+### Remaining verification
 
-- Implement the approved strict-revocation delivery model and document its caching tradeoffs.
-- Ensure moderation and retention state changes invalidate or rapidly expire public access.
-- Complete export archive behavior, observability, retry handling, and cleanup through the storage abstraction.
-- Make event retention and privacy behavior visible and understandable in host settings.
+- Run `./gradlew spotlessCheck test`, `./gradlew openApiCheck`, and `./gradlew phase4ProcessTest` with Docker available.
+- Run pinned Prometheus `v3.5.0` `promtool check rules` and `test rules`.
+- Re-run API/worker production configuration and MinIO signed-GET/cleanup coverage.
+- Verify every canonical repository-guidance file is byte-identical to its `.claude` mirror.
 
 ### Exit criteria
 
 - A hidden, deleted, disabled, or expired asset follows the approved access policy even when its old URL is known.
 - Exports are authorized, traversal-safe, time-limited, and cleaned up.
+- Cleanup retries provider failures without losing database recovery state or blocking unrelated due items.
+- After every gate passes, the next backend work becomes the Phase 8/9 delivery-confidence gap set; Angular Phase 7 remains paused.
 
 ## Phase 7 - Angular Guest and Host Application
 

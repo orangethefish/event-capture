@@ -3,9 +3,15 @@
 ## Auth and Sessions
 
 - Host auth model:
-  - magic link token stored hashed in DB
-  - token TTL from config: `PT15M`
-  - successful consume stores a host principal in servlet session via `HttpSessionSecurityContextRepository`
+  - magic-link tokens are stored hashed, expire at `expiresAt <= now`, and are locked pessimistically so one token authenticates once
+  - each issued token remains independently valid until consumed/expired and carries an allowlisted `/host` return path
+  - both JSON consume and browser completion rotate any pre-authentication session ID and save `ROLE_HOST` through `HttpSessionSecurityContextRepository`
+  - browser completion returns token-free `303` success/fixed-failure destinations with `no-store` and `no-referrer`
+  - Google identity is anchored to verified nonblank `sub`; only first login may link an existing host through verified normalized email
+- Abuse model:
+  - every email/IP/session/event/guest counter and clearance subject is HMACed before storage
+  - any hard cap wins and returns the longest safe retry; challenges apply only to magic request, guest join, and upload init
+  - valid Turnstile grants a 15-minute server-side operation-family clearance; provider unavailability fails closed with retryable `503`
 - Guest auth model:
   - no account
   - event-scoped cookie
@@ -109,19 +115,22 @@
 - Retention and deleted-photo cleanup remove deterministic storage prefixes as well as database-recorded paths so storage writes that preceded a rolled-back database commit remain recoverable.
 ## Moderation and Export
 
-- Moderation actions supported:
-  - hide
-  - unhide
-  - delete
-- Delete is soft at application level:
-  - sets visibility to `DELETED`
-  - sets `deletedAt`
-- Export jobs run asynchronously and build archives through the storage abstraction.
-- Ready exports expose a signed R2 or local backend download URL until `archiveExpiresAt`; expired downloads return `410 Gone`.
+- Moderation, media processing, and deleted-photo purge acquire the same pessimistic photo lock.
+- Allowed moderation transitions are `VISIBLE -> HIDDEN`, `HIDDEN -> VISIBLE`, and `VISIBLE|HIDDEN -> DELETED`.
+- Repeating the current action is an idempotent no-op with no audit/outbox row. `DELETED` is terminal for hide/unhide.
+- The first delete sets `deletedAt`; later deletes never change it. Flyway V8 requires `deletedAt` exactly for `DELETED` rows.
+- Public assets require visible/ready media, enabled gallery, and unexpired retention. Every GET/HEAD outcome carries strict no-store/no-cache/zero-age/`nosniff` headers; denials are indistinguishable `404` responses.
+- Export requests after event retention expiry return `410 Gone`.
+- Export jobs run asynchronously and include every non-deleted finalized original, including hidden, processing, and failed photos, ordered by `(createdAt, id)`.
+- Archive expiry is the earlier of completion plus 24 hours or event retention. R2 GET signatures are capped again by configured presign TTL and remaining archive/retention lifetime.
+- Ready exports expose a refreshed signed R2 or local backend download URL until the effective deadline; expired status omits the URL and downloads return `410 Gone`.
 - The canonical download route is `GET /api/v1/host/events/{eventId}/exports/{exportId}/download`.
+- ZIP responses use `application/zip`, attachment disposition, private/no-store caching, and `nosniff`.
 - Guest-controlled client filenames are normalized to traversal-safe ZIP basenames; duplicate normalized names receive deterministic numeric suffixes.
 - Export job statuses:
-  - `QUEUED`
-  - `PROCESSING`
-  - `READY`
-  - `FAILED`
+  - `QUEUED -> PROCESSING -> READY`
+  - exhausted or permanent failure -> `FAILED`
+  - `READY` and `FAILED` are terminal under duplicate delivery
+- Missing jobs after retention purge are no-ops. `markFailed` never deletes/downgrades an already-ready archive.
+- Retention expiry, missing originals, and invalid targets are permanent. Provider/network/5xx failures use five total attempts with existing backoff.
+- Retained-event cleanup aborts every incomplete multipart upload before deletion. Expired archives/uploads are locked and rechecked one transaction per item so failures retain recovery state and later items continue.
