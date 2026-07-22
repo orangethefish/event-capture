@@ -1,0 +1,21 @@
+clone:
+  depth: full
+
+pipelines:
+  default:
+      - step:
+          name: Mirror to GitHub
+          image: atlassian/default-image:4
+          script:
+            # 1. Fetch all origin branches and tags without touching checked-out HEAD
+            - git fetch origin --prune
+            - git fetch origin --tags
+            
+            # 2. Delete the symbolic origin/HEAD ref so the wildcard doesn't catch it
+            - git remote set-head origin -d || true
+            
+            # 3. Force push all remote tracking branches to GitHub
+            - git push --force --prune git@github.com:orangethefish/${BITBUCKET_REPO_SLUG}.git 'refs/remotes/origin/*:refs/heads/*'
+            
+            # 4. Force push tags to GitHub (in case any tags were also rewritten)
+            - git push --force --tags git@github.com:orangethefish/${BITBUCKET_REPO_SLUG}.git
