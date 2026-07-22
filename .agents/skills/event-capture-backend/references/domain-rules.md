@@ -3,9 +3,15 @@
 ## Auth and Sessions
 
 - Host auth model:
-  - magic link token stored hashed in DB
-  - token TTL from config: `PT15M`
-  - successful consume stores a host principal in servlet session via `HttpSessionSecurityContextRepository`
+  - magic-link tokens are stored hashed, expire at `expiresAt <= now`, and are locked pessimistically so one token authenticates once
+  - each issued token remains independently valid until consumed/expired and carries an allowlisted `/host` return path
+  - both JSON consume and browser completion rotate any pre-authentication session ID and save `ROLE_HOST` through `HttpSessionSecurityContextRepository`
+  - browser completion returns token-free `303` success/fixed-failure destinations with `no-store` and `no-referrer`
+  - Google identity is anchored to verified nonblank `sub`; only first login may link an existing host through verified normalized email
+- Abuse model:
+  - every email/IP/session/event/guest counter and clearance subject is HMACed before storage
+  - any hard cap wins and returns the longest safe retry; challenges apply only to magic request, guest join, and upload init
+  - valid Turnstile grants a 15-minute server-side operation-family clearance; provider unavailability fails closed with retryable `503`
 - Guest auth model:
   - no account
   - event-scoped cookie

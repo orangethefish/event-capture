@@ -50,9 +50,10 @@ Historical result: the forced backend test run passed 44 tests with no failures;
 - Production and worker-only local modes, unavailable required Redis, and conflicting canonical/legacy infrastructure settings now fail startup.
 - Security and controller errors use standardized ProblemDetails; liveness is process-focused and readiness includes the database plus mode-aware Redis health.
 - Phase 2 implementation was completed on 2026-07-17 with media-fixture, checksum, multipart, cleanup, presigner, production-validation, and S3-compatible storage tests written before runtime changes.
-- The full backend suite passes 149 tests with 0 failures/errors and 1 skipped opt-in live R2 test; `spotlessCheck` and the canonical `openApiCheck` pass. The production image was built and the exact libvips command was validated as the non-root runtime user.
+- The Phase 5 backend suite passes 176 tests with 0 failures/errors and 1 skipped opt-in live R2 test; `spotlessCheck`, the canonical `openApiCheck`, and `phase4ProcessTest` pass. The production image was previously built and the exact libvips command was validated as the non-root runtime user.
 - Phase 3 Release A and Release B are implemented and complete for the current greenfield target. No release or application database has been deployed, so the first deployment migrates a fresh database directly through V6 with the configured keyring; legacy preflight/backfill/cutover steps are not pending prerequisites.
 - Phase 4 is complete for the approved backend scope. Child-process crash/restart and Redis-interruption proof, live multi-API SSE disconnect/resync, storage-side-effect idempotency auditing, queue gauges/handler histograms, and deployment-owned alert rules now complement the durable outbox/retry/DLQ runtime.
+- Phase 5 is complete. Browser magic-link completion, verified Google OIDC, session rotation, HMAC-keyed local/Redis abuse enforcement, Turnstile clearance, trusted-proxy resolution, API-only provider configuration, and production validation are implemented and evidenced in `.agents/docs/PHASE5_AUTHENTICATION.md`.
 - Phase 2's live-provider exit gate passed on 2026-07-17 using the replacement token loaded directly from the ignored `.env`. The live run exposed two covered regressions: provider multipart upload IDs now persist as opaque text through Flyway V3, and the smoke client JSON-encodes quoted provider ETags.
 - Phase 7 remains on hold.
 
@@ -96,7 +97,7 @@ Frontend implementation is explicitly paused. Do not scaffold Angular, generate 
 ### Tests first
 
 - Boot the API with the explicit local session mode and no Redis; prove CSRF bootstrap, magic-link consume, authenticated `me`, and logout work without Redis connection attempts.
-- Boot the API and worker in Redis mode; prove Spring Session, rate limiting, SSE fan-out, and job dispatch select Redis-backed implementations.
+- Boot the API and worker in Redis mode; prove Spring Session, abuse enforcement, SSE fan-out, and job dispatch select Redis-backed implementations.
 - Add credentialed CORS preflight and mutation tests using `X-XSRF-TOKEN`, allowed frontend origins, cookies, rejected origins, and rejected unlisted headers.
 - Add mail-delivery failure tests proving logs and error responses contain neither the raw magic-link token nor URL.
 - Add export tests using names such as `../outside.jpg`, absolute paths, separators, duplicate normalized names, control characters, and empty names.
@@ -204,28 +205,25 @@ Status: complete. Runtime behavior, local and S3-compatible contracts, productio
 - Operators can detect stalled/high outbox state, pending work, retry storms, DLQ depth, terminal failures, publication failures, slow handlers, and missing metrics.
 
 ## Phase 5 - Authentication, OAuth, and Abuse Controls
-**Status: partially implemented.** Magic links, sessions, conditional Google OAuth, CSRF/CORS, and base rate limits exist; full integration coverage, safe frontend redirects, and risk-based challenge policy remain.
+**Status: complete.** Browser-safe magic links, verified Google OIDC, session fixation protection, distributed abuse enforcement, Turnstile, trusted-proxy handling, production validation, and deployment wiring are implemented.
 
-### Tests first
+### Delivered
 
-- Add magic-link request, expiry, one-time consume, replay, rolling-session, logout, CSRF, delivery-failure, and rate-limit integration coverage.
-- Add Google OAuth end-to-end integration coverage with a mock authorization server, including existing/new host linking, denied consent, invalid state, callback failure, and safe frontend redirects.
-- Test redirect allowlists so user-controlled input cannot produce an open redirect.
-- Add risk-policy tests that distinguish normal guest join/upload traffic from suspicious bursts and prove challenge verification fails closed only when required.
+- Preserved the JSON magic-link consume endpoint and added token-free `303` browser completion with fixed safe failures, persisted allowlisted return paths, inclusive expiry, pessimistic replay protection, and `MAGIC_LINK` identity creation.
+- Centralized host-session authentication so controller-managed magic links and Google login rotate pre-authentication IDs and persist `ROLE_HOST` through the configured Spring Session repository.
+- Completed conditional Google OAuth with state-bound return paths, bounded pending entries, verified `sub`/email claims, first-login verified-email linking, safe terminal failures, and cleanup.
+- Replaced service-level rate-limit calls and the placeholder risk policy with exact local/atomic Redis rolling windows, HMAC-only subjects, cross-instance clearance, hard-cap precedence, and safe retry metadata.
+- Completed Turnstile hostname/action validation, dependency-unavailable handling, trusted IPv4/IPv6 proxy-chain resolution, CORS challenge support, secure cookies, and production SMTP/OAuth/proxy/redirect/abuse validation.
+- Restricted auth/provider settings to production API nodes, required explicit public HTTPS origins in Compose, updated `env.example`, and documented deployment/smoke expectations.
 
-### Implementation
+### Exit criteria evidence
 
-- Redirect successful login to the configured Angular dashboard route, preserving only allowlisted relative destinations.
-- Pass SMTP and OAuth configuration through local/deployment manifests without placing secrets in tracked files.
-- Add Cloudflare Turnstile behind a provider interface and invoke it only for suspicious join/upload flows based on documented signals.
-- Tune rate limits by event, guest session, host session, IP, and operation; provide safe retry metadata.
-- Confirm secure cookie, SameSite, proxy-header, TLS, session fixation, and session TTL behavior in the deployed topology.
+- Unit and HTTP integration tests cover redirect attacks, exact expiry, JSON/browser consume, replay, session rotation, logout/CSRF/CORS, safe delivery failure, every balanced abuse threshold, Turnstile outcomes, and production configuration.
+- An embedded signed OIDC provider exercises the real authorization-code, state, token, JWKS, user-info, success, denied-consent, and invalid-identity paths.
+- PostgreSQL proves concurrent one-time consume; Redis proves cross-instance counters/clearance and identifier-free keys.
+- Production Compose renders with non-secret fixtures, the OpenAPI snapshot is intentionally additive, and full evidence is recorded in `.agents/docs/PHASE5_AUTHENTICATION.md`.
 
-### Exit criteria
-
-- Magic-link and Google login work end to end from Angular through the API.
-- No auth error path leaks credentials or permits an untrusted redirect.
-- Abuse controls do not challenge ordinary event traffic by default.
+Angular remains paused, so HTTP integration tests emulate browser behavior; real Angular/browser E2E remains Phase 7/9 work.
 
 ## Phase 6 - Privacy, Moderation, Delivery, and Exports
 

@@ -23,6 +23,16 @@
   - `backend/src/main/java/com/eventcapture/backend/auth/AuthController.java`
   - `backend/src/main/java/com/eventcapture/backend/auth/AuthService.java`
   - `backend/src/main/java/com/eventcapture/backend/auth/OAuth2LoginSuccessHandler.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/OAuth2LoginFailureHandler.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/HostSessionAuthenticationService.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/FrontendRedirectPolicy.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/StateAwareAuthorizationRequestRepository.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/OAuthReturnPathAuthorizationRequestResolver.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/AuthConfigurationValidator.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/AbuseProtectionService.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/RedisAbuseStore.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/TurnstileChallengeVerifier.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/ClientIpResolver.java`
 - Host event APIs:
   - `backend/src/main/java/com/eventcapture/backend/host/HostController.java`
   - `backend/src/main/java/com/eventcapture/backend/event/Event.java`
@@ -66,6 +76,7 @@
   - `backend/src/main/resources/db/migration/V4__phase3_release_a.sql`
   - `backend/src/main/resources/db/migration/V5__transactional_outbox.sql`
   - `backend/src/main/resources/db/migration/V6__phase3_release_b.sql`
+  - `backend/src/main/resources/db/migration/V7__phase5_authentication.sql`
 
 ## Tests
 
@@ -80,6 +91,10 @@
   - `backend/src/test/java/com/eventcapture/backend/integration/Phase3MigrationIntegrationTest.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/Phase3ReleaseBMigrationH2Test.java`
   - `backend/src/test/java/com/eventcapture/backend/integration/Phase3ReleaseBMigrationPostgresIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase5MagicLinkIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/MagicLinkConcurrencyIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/GoogleOAuthFlowIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/RedisAbuseStoreIntegrationTest.java`
 - Unit coverage:
   - `backend/src/test/java/com/eventcapture/backend/event/EventServiceTest.java`
   - `backend/src/test/java/com/eventcapture/backend/auth/AuthServiceTest.java`

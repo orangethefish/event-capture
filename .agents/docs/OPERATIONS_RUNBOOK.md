@@ -56,7 +56,13 @@ Exercise throttling, denied credentials, missing objects, multipart abort idempo
 
 ## Auth and external providers
 
-In staging, verify SMTP failure redaction, magic-link expiry/replay, Google consent denial/callback failure, the configured frontend success route, secure/SameSite cookies behind the production proxy/TLS topology, and session fixation/rolling TTL. Turnstile secrets are required only when `APP_CHALLENGE_MODE=turnstile`; normal traffic remains unchallenged and challenged traffic fails closed.
+Production API nodes require explicit HTTPS base/frontend URLs, secure host and guest cookies, SMTP host/from/timeouts, Turnstile site/secret/hostname settings, trusted-proxy CIDRs, and a deployment-specific abuse HMAC secret. Google OAuth is optional, but its ID, secret, and explicit HTTPS callback URI are all-or-nothing. Provider credentials belong only on API nodes; do not pass them to workers.
+
+Before release, render `backend/compose.prod.yml` with non-secret fixtures, then smoke the deployed API through its real TLS proxy. Verify the browser magic-link `303` success and fixed failure routes, token-free destinations, `no-store`/`no-referrer`, inclusive expiry, single-use replay rejection, pre-authentication session rotation, Redis rolling TTL, logout, CSRF, and `HttpOnly; Secure; SameSite=Lax; Path=/` host/guest cookies. Confirm the XSRF cookie is Secure and intentionally JavaScript-readable.
+
+For Google, verify consent success and denial, callback failure, state rejection, first-login verified-email linking, subsequent `sub` login, and callback completion on a different API instance. Never expose provider error descriptions. For Turnstile, exercise an operation-specific challenged request, invalid token, hostname/action mismatch, provider outage, 15-minute shared clearance, and hard-cap precedence. Provider outage must return retryable `503`; hard denial must return `429` with a conservative `Retry-After`.
+
+Validate the proxy trust boundary with a known client address: forwarded chains are honored only when the socket peer is in `APP_HTTP_TRUSTED_PROXY_CIDRS`, and canonical email/OAuth URLs always come from configured base/callback URLs. Inspect Redis keys only by prefix/count; identifiers are HMACed and raw IPs, emails, event IDs, guest IDs, session IDs, tokens, secrets, and provider responses must not be logged.
 
 ## Observability and privacy
 

@@ -23,7 +23,7 @@
   - PostgreSQL Testcontainers for integration coverage
   - Configured via dynamic Spring properties in the integration suites
 - Redis:
-  - Selected explicitly with `APP_INFRASTRUCTURE_MODE=redis` for Spring Session, rate limiting, SSE fan-out, and worker jobs
+  - Selected explicitly with `APP_INFRASTRUCTURE_MODE=redis` for Spring Session, abuse counters/clearance, SSE fan-out, and worker jobs
   - Integration tests use a Redis Testcontainer
 - Local storage root:
   - `${java.io.tmpdir}/event-capture-storage`
@@ -31,11 +31,11 @@
 
 ## What Exists Today
 
-- Host magic-link auth with HttpSession-backed `ROLE_HOST` access
-- Conditional Google OAuth success flow
+- Host magic-link auth with compatible JSON consume, browser `303` completion, allowlisted persisted return paths, pessimistic single-use consume, normalized identity linking, and explicit Spring Session fixation rotation
+- Conditional Google OAuth authorization-code/state flow with shared-session state-bound return paths, verified `sub`/email claims, safe terminal redirects, and cleanup
 - Dual CSRF bootstrap routes at `/api/v1/csrf` and `/api/v1/auth/csrf`
-- Deterministic `local` and `redis` infrastructure selection for sessions, rate limits, SSE, and jobs; production and worker-only local modes fail startup
-- Credentialed CORS restricted to the configured frontend origin with `X-XSRF-TOKEN`
+- Deterministic `local` and `redis` infrastructure selection for sessions, abuse counters/clearance, SSE, and jobs; production and worker-only local modes fail startup
+- Credentialed CORS restricted to the configured frontend origin with `X-XSRF-TOKEN`/`X-Challenge-Token`, plus exposed retry/correlation headers
 - Standardized ProblemDetail security/controller errors, safe magic-link delivery logs, safe ZIP entry names, and mode-aware readiness
 - Host event CRUD
 - Public event lookup by `{slug}/{shareToken}`
@@ -51,7 +51,8 @@
 - `PROCESS_UPLOAD` retries transient storage, native-command, and dependency failures with bounded exponential backoff while invalid/corrupt media and invalid job targets remain permanent
 - Host moderation endpoints
 - Async export job creation, status lookup, signed/local download URLs, and expired-download enforcement
-- Flyway schema for all core domain tables
+- Flyway schema for all core domain tables plus V7 magic-link return paths
+- Operation-aware local/Redis rolling-window abuse enforcement with HMAC-only subjects, Turnstile clearance, trusted-proxy client IP resolution, safe `403`/`429`/`503` metadata, and fail-closed production behavior
 - Storage abstraction for local filesystem and Cloudflare R2
 - Redis Streams worker jobs with outbox-backed delayed retries and a dead-letter stream
 - Current gauges for unpublished outbox count/age, pending stream entries, and DLQ depth, plus retry/failure/claim counters and tagged handler-duration histograms
@@ -69,7 +70,7 @@
   - event state rules and slug/share-path behavior
   - magic-link request and consume lifecycle
   - guest session create/resume/validation lifecycle
-  - in-memory rate limiter windows
+  - local and Redis abuse rolling-window behavior
   - upload finalize and presign behavior
   - R2 presign and multipart completion behavior
   - native source decode fallback behavior for HEIC/HEIF and WEBP
@@ -80,13 +81,14 @@
 - Backend-served upload binary endpoints still exist for `local` storage mode even though presigned direct upload is implemented for `r2`
 - Production media processing uses libvips; Java/ImageIO remains the portable local/test fallback
 - Production media reads use backend-authorized asset endpoints for strict revocation; a public base URL remains available only outside production
-- Local mode uses an in-memory `MapSessionRepository` and process-local rate limits, SSE, and job dispatch; it is intentionally non-durable and single-process only
+- Local mode uses an in-memory `MapSessionRepository` and process-local abuse counters/clearance, SSE, and job dispatch; it is intentionally non-durable and single-process only
 - Cleanup scheduling relies on periodic scans plus idempotent handlers rather than explicit deduplication state
 
 ## Active Completion Gaps
 
 - Phase 3 is complete for the current undeployed greenfield target. The first deployment migrates a fresh database through V6; the Release A-to-B runbook applies only to a future upgrade from existing pre-V6 data.
 - Phase 4 is complete for the approved backend scope. Crash/restart and Redis interruption proof, live SSE disconnect/resync, storage-side-effect idempotency auditing, and deployment-owned alert rules are implemented; broader dashboards remain a later observability phase.
+- Phase 5 is complete. Browser magic links, verified Google OIDC, session fixation protection, distributed abuse policy, Turnstile, proxy trust, API-only provider configuration, and production validation are covered by unit, HTTP, PostgreSQL, Redis, and embedded-OIDC tests.
 - Moderation transitions, strict asset cache headers, remaining-lifetime export presigns, and retention-purge multipart aborts remain Phase 6 work.
 
 ## Known Traps
@@ -96,12 +98,12 @@
 - Both CSRF bootstrap routes are valid today:
   - `AuthController` exposes `GET /api/v1/auth/csrf`
   - `CsrfController` exposes `GET /api/v1/csrf`
-- OAuth is conditional:
-  - `ApiSecurityConfig` only enables `oauth2Login` if a `ClientRegistrationRepository` bean exists
-  - This avoids test boot failures when no OAuth client is configured
+- OAuth is conditional: the Google client registration and `oauth2Login` wiring exist only for an all-or-nothing ID/secret/redirect-URI configuration. Production additionally requires an explicit HTTPS callback.
+- `APP_AUTH_SUCCESS_PATH` is canonical; `APP_OAUTH_SUCCESS_PATH` is only a deprecated fallback. Both magic links and OAuth use the same allowlisted frontend return-path policy.
+- Forwarded client IPs are trusted only from configured proxy CIDRs. Forwarded host/protocol values never generate email links or OAuth callbacks.
 - `events` stores `share_token_hash`, `share_token_ciphertext`, and `share_token_key_id`; V6 removes recoverable plaintext.
 - Host `sharePath` always decrypts ciphertext, public lookup remains hash-based, and startup rejects a keyring missing any referenced database key ID.
-- A greenfield deployment runs directly through V6 with maintenance flags disabled. If an existing pre-V6 environment is ever upgraded, Release A and Release B binaries remain incompatible across V6 and require the coordinated cutover/restore runbook.
+- A greenfield deployment runs directly through V7 with maintenance flags disabled. If an existing pre-V6 environment is ever upgraded, Release A and Release B binaries remain incompatible across V6 and require the coordinated cutover/restore runbook.
 - `upload_intents.upload_token_hash` is still not used to authorize the local-storage binary upload endpoints
 - Public asset URLs are opaque tokens, but access is still checked against:
   - photo visibility

@@ -4,7 +4,7 @@
 
 - Build the backend as a Spring Boot 3.5.x servlet application on Java 21 with Gradle.
 - Use one codebase with two runtime roles: `api` and `worker`.
-- Use PostgreSQL for application data, Redis for sessions, rate limiting, SSE fan-out, and background queueing, and Cloudflare R2 for object storage.
+- Use PostgreSQL for application data, Redis for sessions, distributed abuse enforcement, SSE fan-out, and background queueing, and Cloudflare R2 for object storage.
 - Use Spring Data JPA as the default persistence model, Flyway for SQL migrations, RFC 9457 Problem Details for errors, and OpenAPI for API documentation.
 - Keep the system cookie-authenticated for hosts, guest-session based for contributors, and mobile-web optimized for direct browser uploads.
 
@@ -107,6 +107,7 @@
 
 - `POST /api/v1/auth/magic-link/request`
 - `GET /api/v1/auth/magic-link/consume`
+- `GET /api/v1/auth/magic-link/complete`
 - `GET /api/v1/auth/oauth2/authorization/google`
 - `GET /login/oauth2/code/google`
 - `POST /api/v1/auth/logout`
@@ -152,13 +153,13 @@
 ## Security, Sessions, and Realtime
 
 - Host auth uses one-time DB-backed magic-link tokens plus Google OAuth.
-- Magic-link tokens are stored hashed, expire in 15 minutes, and are single-use.
-- Host sessions are Redis-backed, HttpOnly, Secure, rolling 30-day sessions.
+- Magic-link tokens are stored hashed, expire in 15 minutes, are pessimistically single-use, and carry allowlisted frontend return paths. Browser email links complete through a token-free `303` redirect while the JSON consume contract remains available.
+- Host sessions are Redis-backed, HttpOnly, Secure, rolling 30-day sessions; controller-managed authentication explicitly rotates the pre-authentication session ID and persists the security context.
 - Guest sessions are event-scoped cookies lasting until event close or 30 days, whichever comes first.
 - Use CSRF cookie/header protection for all mutating cookie-authenticated requests.
 - Use `SameSite=Lax` unless deployment constraints force a stricter change.
-- Apply Redis-backed rate limiting to magic-link requests, guest-session creation, upload init, and upload finalize.
-- Use Cloudflare Turnstile only on suspicious guest flows and abusive auth attempts.
+- Apply operation-aware rolling-window abuse policy to magic request/consume, OAuth start, guest join, upload init, and upload finalize. HMAC every stored subject, use atomic Redis counters/clearance in production, and keep behaviorally equivalent local counters.
+- Use Cloudflare Turnstile only after suspicious magic-request, guest-join, or upload-init thresholds; grant bounded server-side clearance, preserve hard caps, and fail closed when verification is unavailable.
 - Use Redis pub/sub to fan out photo-ready and moderation events to SSE connections across API instances.
 - SSE events should include `photo_ready`, `photo_hidden`, `photo_unhidden`, and `photo_deleted`.
 
