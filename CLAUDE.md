@@ -9,12 +9,23 @@
 ## Current Repo State
 
 - `backend` is now a working Spring Boot 3.5.x Gradle project.
-- The frontend has not been scaffolded yet.
-- Frontend implementation is explicitly paused until the product owner finishes and approves the wireframe and design. Backend work may continue without scaffolding or implementing Angular.
+- `frontend` is now a working Angular 19 application (standalone components, signals). The wireframe/design pause has been lifted and Phase 7 is implemented.
+- `backend/` and `frontend/` are git submodules; both plus this `AGENTS.md` are the source of truth for what runs today. The planning docs remain target-state references.
 - Root planning docs are in `.agents/docs/IMPLEMENTATION_PLAN.md` and `.agents/docs/BACKEND_IMPLEMENTATION_PLAN.md`.
 - The dependency-ordered work needed to close the audited gaps and complete the v1 application is in `.agents/docs/APPLICATION_COMPLETION_PLAN.md`.
-- `backend/` plus this `AGENTS.md` are the source of truth for what runs today. The planning docs remain target-state references.
+- Deployment is documented in `.agents/docs/DEPLOYMENT.md`, with `docker-compose.yml` at the repo root.
 - Production-oriented environment variables are documented in `env.example`.
+
+## Deployment Topology
+
+- The SPA and the API are served from **one public origin**. The frontend nginx container proxies `/api/v1`, `/login/oauth2`, and `/actuator` to the API container.
+- This is load-bearing, not stylistic:
+  - host and guest session cookies are `SameSite=Lax`, which browsers will not send cross-site, so split `api.`/`app.` origins break authentication outright
+  - `PublicAssetUrlBuilder` emits relative `/api/v1/public/assets/...` URLs whenever `APP_STORAGE_PUBLIC_BASE_URL` is empty, which production requires for strict revocation
+  - same-origin means no production CORS
+- `APP_BASE_URL` and `APP_FRONTEND_ORIGIN` must be the same origin.
+- The `/api/v1/` proxy location must keep `proxy_buffering off` and `chunked_transfer_encoding on`, or the SSE gallery stream is buffered and the live gallery appears broken.
+- `APP_HTTP_TRUSTED_PROXY_CIDRS` must include the nginx network, or `ClientIpResolver` attributes every request to the proxy and all per-IP abuse limits collapse into one bucket.
 
 ## Backend Status
 
@@ -80,7 +91,7 @@
 - `PROCESS_UPLOAD` distinguishes permanent invalid/corrupt media from transient storage, native-command, and dependency failures. Transient failures use bounded exponential retries and become terminal/DLQ-visible only after exhaustion.
 - Upload worker media inspection verifies JPEG, PNG, WEBP, HEIC, and HEIF signatures against the declared MIME type, rejects truncated/spoofed content, validates encoded/decoded dimensions and pixel limits, and normalizes JPEG EXIF orientation before publishing.
 - Native media commands have a 60-second timeout and bounded diagnostic output.
-- The media variant pipeline is selected through `APP_MEDIA_PROCESSOR=java|libvips`: Java remains the portable local/test fallback, while production Compose selects libvips for bounded auto-rotating, metadata-stripping re-encoding. Production images include `libvips-tools`, HEIF, and WEBP helpers.
+- The media variant pipeline is selected through `APP_MEDIA_PROCESSOR=java|libvips`: Java remains the portable local/test fallback, while the root `docker-compose.yml` selects libvips for bounded auto-rotating, metadata-stripping re-encoding. Production images include `libvips-tools`, HEIF, and WEBP helpers.
 - Export jobs are now executed asynchronously and can return a signed or local download URL once `READY`. Duplicate builds take a pessimistic export-job lock, use a deterministic archive key, and remove that key on terminal failure even if its database path did not commit.
 - Phase 6 moderation uses one pessimistic photo lock across moderation, media processing, and deleted-photo purge. Only `VISIBLE -> HIDDEN`, `HIDDEN -> VISIBLE`, and `VISIBLE|HIDDEN -> DELETED` change state; repeated actions are no-op `204` responses, deletion is terminal, and the first `deletedAt` remains immutable.
 - Public asset delivery applies `no-store`, `no-cache`, zero-age, `Pragma`, `Expires`, and `nosniff` headers through an API-role filter for every GET/HEAD success or error. Hidden, deleted, non-ready, gallery-disabled, retention-expired, purged, and unknown assets remain indistinguishable `404` responses.
@@ -97,7 +108,7 @@
 - Deployment-owned Prometheus rules and executable `promtool` tests cover outbox stall/backlog, pending work, retries, DLQ depth, terminal/publish failures, p95 handler latency, missing queue metrics, terminal exports, and provider cleanup failures by cleanup type. Bitbucket and Jenkins validate them with pinned Prometheus `v3.5.0`.
 - A MinIO Testcontainers suite exercises the R2 adapter contract through real S3-compatible HTTP for presigned single-part upload, multipart completion, abort, head/read/write, retention-aware signed export GET duration/response overrides, export reads, and prefix cleanup.
 - Phase 5 tests include browser magic-link/session behavior, PostgreSQL concurrent replay, an embedded signed OIDC provider, every balanced abuse threshold, Redis cross-instance counters/clearance, Turnstile classification, trusted proxy chains, CORS, and production configuration validation.
-- Phase 6 has a green 39-test focused non-container suite plus successful compilation and formatting. Docker is currently unavailable locally, so the full PostgreSQL/Redis/MinIO suite, Phase 4 child-process recovery, `promtool`, OpenAPI, and production-configuration exit gates remain mandatory before Phase 6 may be marked complete.
+- Phase 6 has a green 39-test focused non-container suite plus successful compilation and formatting. The full PostgreSQL/Redis/MinIO suite, Phase 4 child-process recovery, `promtool`, OpenAPI, and production-configuration exit gates remain mandatory before Phase 6 may be marked complete. Docker is available locally again, so these can now be run.
 - The live R2 test verifies direct single-part and multipart upload, asynchronous processing, export generation/read, incomplete-upload cleanup, and retention cleanup without exposing signed URLs or credentials. Provider-issued multipart upload IDs are stored as opaque text, and quoted provider ETags are JSON-encoded as opaque values.
 
 ### Intentionally Temporary
@@ -117,7 +128,9 @@
 - Persist share tokens as a lookup hash plus an encrypted recoverable value for the host-facing share link; do not store the recoverable token as plaintext.
 - Enforce strict public-asset revocation: hidden, deleted, disabled, or expired media must stop being retrievable even through a previously known URL.
 - Evaluate libvips first for the native media pipeline and require parity tests before replacing the current Java implementation.
-- Use npm and Angular CLI when frontend work is authorized. Frontend work remains paused until the product owner explicitly approves the completed wireframe and design.
+- Use npm and the Angular CLI for frontend work. The wireframe/design pause has been lifted.
+- Serve the SPA and the API from a single origin; do not reintroduce a split `api.`/`app.` topology while session cookies remain `SameSite=Lax`.
+- Backend DTOs are authoritative for every wire shape. The frontend adapts; do not change a backend record to match a hand-authored TypeScript model.
 
 ## Important Backend Files
 
@@ -278,6 +291,37 @@
   - `cd backend && ./gradlew compileJava`
 - Start app locally:
   - `cd backend && ./gradlew bootRun`
+- Frontend:
+  - `cd frontend && npm ci`
+  - `npm start` (dev server on 4200; proxies `/api`, `/login/oauth2`, `/actuator` to 8080)
+  - `npm run lint`
+  - `npm test -- --watch=false --browsers=ChromeHeadless`
+  - `npm run build -- --configuration production`
+  - `npm run e2e` (builds the backend jar, then Playwright boots API + SPA itself)
+- Full stack:
+  - `docker compose up -d` from the repo root after building both artifacts
+
+## Frontend Status
+
+### Implemented
+
+- Angular 19 standalone-component application with signals, lazy-loaded host and guest feature routes, and a shared component library under `src/app/shared/components`.
+- Host surface: magic-link and Google sign-in, event list/create/edit, event overview, QR/share dialog, moderation grid, and export create/poll/download.
+- Guest surface: share-link resolution, display-name join, camera-roll upload with progress and retry, live gallery, and photo viewer.
+- Typed API models in `src/app/core/models` mirroring the backend records exactly, with shared typed fixtures in `src/testing/fixtures.ts`.
+- Interceptor chain `credentials -> csrf -> challenge`:
+  - CSRF sends the raw `XSRF-TOKEN` cookie value; `GET /api/v1/csrf` is only a cookie bootstrap because `SpaCsrfTokenRequestHandler` resolves a header-borne token with the plain handler while the body token is XOR-masked
+  - the challenge interceptor renders Turnstile from the `siteKey` in the backend's 403 problem body and retries once with `X-Challenge-Token`
+- Uploads branch on `UploadInitResponse.mode`; multipart slices the file by `partSizeBytes`, uploads contiguous 1-based parts with bounded concurrency, and preserves provider ETags verbatim.
+- SSE registers a listener per named backend event and treats the payload as a bare photo UUID: removals apply locally, additions and unhides resync the feed head, bursts are coalesced, and reconnects resync from REST.
+- Self-contained QR rendering via bundled `qrcode-generator`; nothing is fetched from a CDN.
+- Media bindings guard the null `imageUrl`/`thumbnailUrl` the backend returns for unprocessed and failed photos.
+
+### Testing
+
+- 317 Karma/Jasmine specs: services, interceptors, guard, all shared components, all nine feature pages, plus `src/app/core/integration/` covering router + guard + interceptor seams together.
+- 32 Playwright end-to-end tests across desktop and mobile viewports, run against a real backend in the documented Redis-free local mode (H2, in-process jobs, local storage, `challenge.mode=off`, `auth.debug-token-exposure=true` so a host can sign in without SMTP).
+- `e2e/api-contract.spec.ts` asserts backend field names, enum values, unknown-field rejection, and the raw-versus-masked CSRF token behavior against the live API. Extend it whenever a new endpoint is consumed.
 
 ## Backend Workflow Rules
 
@@ -342,7 +386,11 @@
 ## Next Likely Work
 
 - Finish the Docker-backed Phase 6 exit gates: full PostgreSQL/Redis/MinIO tests, Phase 4 process recovery, OpenAPI, production configuration, and Prometheus rule checks. Do not mark Phase 6 complete before those gates pass.
-- After Phase 6 verification closes, the next backend work is the Phase 8/9 delivery-confidence gap set. Angular Phase 7 remains paused until the product owner approves the wireframe and design.
+- After Phase 6 verification closes, the next backend work is the Phase 8/9 delivery-confidence gap set.
 - Use `.agents/docs/PHASE3_RELEASE.md` only if a future environment must upgrade existing pre-V6 data. The current undeployed greenfield environment migrates directly through V8 with the configured keyring and both maintenance flags disabled.
 - Preserve the completed Phase 1 through Phase 5 runtime, security, resilience, auth, and abuse gates; keep the full backend, OpenAPI, and Phase 4 process checks passing after every backend phase.
-- Do not scaffold or implement the Angular frontend until the product owner explicitly approves the completed wireframe and design; backend work may continue meanwhile.
+- Frontend follow-ups that are known and deliberately not yet done:
+  - the compose stack has not been exercised against real R2, SMTP, Turnstile, or Google OAuth credentials; only the local-mode stack has been run end to end
+  - event cover/theme configuration has no backend contract, so event cards render a deterministic decorative wash rather than imagery
+  - guest photo counts, guest counts, and "today" stats on the host overview are still placeholder zeros; no backend endpoint exposes them
+  - accessibility review (focus order, reduced motion, screen-reader labelling) has not been completed

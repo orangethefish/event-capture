@@ -1,0 +1,165 @@
+# Production-shaped deployment: PostgreSQL, Redis, a separate API and worker role, and the
+# SPA container that also fronts the API on a single origin.
+#
+# Single origin is deliberate. The host and guest session cookies are SameSite=Lax, which
+# browsers refuse to send cross-site, so the SPA and the API must be reachable through the
+# same scheme://host:port. The `frontend` service proxies /api/v1, /login/oauth2 and
+# /actuator to `backend-api` (see frontend/nginx.conf.template).
+#
+# Prerequisites:
+#   cd backend  && ./gradlew bootJar
+#   cd frontend && npm ci && npm run build -- --configuration production
+#   cp env.example .env   # then fill in real secrets
+#
+# Then: docker compose up -d
+
+name: event-capture
+
+x-backend-env: &backend-env
+  APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL to the public origin}
+  APP_FRONTEND_ORIGIN: ${APP_FRONTEND_ORIGIN:?set APP_FRONTEND_ORIGIN to the same public origin}
+
+  APP_DATASOURCE_URL: jdbc:postgresql://postgres:5432/event_capture
+  APP_DATASOURCE_USERNAME: ${POSTGRES_USER:-event_capture}
+  APP_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+
+  # Redis is mandatory once API and worker are separate processes: it carries sessions,
+  # cross-instance SSE fan-out, the job streams, and the distributed abuse counters.
+  APP_INFRASTRUCTURE_MODE: redis
+  SPRING_DATA_REDIS_HOST: redis
+  SPRING_DATA_REDIS_PORT: 6379
+
+  APP_SESSION_SECURE_COOKIES: ${APP_SESSION_SECURE_COOKIES:-true}
+  APP_SESSION_TTL: ${APP_SESSION_TTL:-P30D}
+
+  # Trust X-Forwarded-For only from the compose network, otherwise ClientIpResolver would
+  # attribute every request to the nginx container and collapse the per-IP abuse limits.
+  APP_HTTP_TRUSTED_PROXY_CIDRS: ${APP_HTTP_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
+
+  # Generate with `openssl rand -base64 32`.
+  APP_ABUSE_KEY_SECRET: ${APP_ABUSE_KEY_SECRET:?a dedicated abuse-key secret is required}
+  APP_SHARE_TOKEN_ACTIVE_KEY_ID: ${APP_SHARE_TOKEN_ACTIVE_KEY_ID:?set the active share-token key id}
+  APP_SHARE_TOKEN_KEYRING: ${APP_SHARE_TOKEN_KEYRING:?set the share-token keyring}
+  APP_SHARE_TOKEN_BACKFILL_ENABLED: "false"
+  APP_SHARE_TOKEN_RELEASE_B_PREFLIGHT_ENABLED: "false"
+
+  # The image installs libvips-tools, libheif-examples and webp for this processor.
+  APP_MEDIA_PROCESSOR: libvips
+
+  APP_STORAGE_PROVIDER: ${APP_STORAGE_PROVIDER:-r2}
+  # Must stay empty: production serves media through authorized backend reads so that hiding,
+  # deleting, disabling or expiring a photo actually revokes access.
+  APP_STORAGE_PUBLIC_BASE_URL: ""
+  APP_STORAGE_R2_BUCKET: ${APP_STORAGE_R2_BUCKET:-}
+  APP_STORAGE_R2_ACCOUNT_ID: ${APP_STORAGE_R2_ACCOUNT_ID:-}
+  APP_STORAGE_R2_ENDPOINT: ${APP_STORAGE_R2_ENDPOINT:-}
+  APP_STORAGE_R2_ACCESS_KEY: ${APP_STORAGE_R2_ACCESS_KEY:-}
+  APP_STORAGE_R2_SECRET_KEY: ${APP_STORAGE_R2_SECRET_KEY:-}
+  APP_STORAGE_R2_PRESIGN_TTL: ${APP_STORAGE_R2_PRESIGN_TTL:-PT15M}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: event_capture
+      POSTGRES_USER: ${POSTGRES_USER:-event_capture}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-event_capture} -d event_capture"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # AOF keeps the job streams and their consumer-group offsets across a restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      <<: *backend-env
+      APP_RUNTIME_ROLE: api
+
+      # API-only concerns. Magic-link delivery and challenge secrets never belong on a worker.
+      APP_AUTH_DEBUG_TOKEN_EXPOSURE: "false"
+      APP_AUTH_SUCCESS_PATH: ${APP_AUTH_SUCCESS_PATH:-/host/events}
+      APP_AUTH_FAILURE_PATH: ${APP_AUTH_FAILURE_PATH:-/host/login/callback}
+      APP_AUTH_ALLOWED_RETURN_PATH_PREFIXES: ${APP_AUTH_ALLOWED_RETURN_PATH_PREFIXES:-/host,/host/}
+
+      APP_SMTP_HOST: ${APP_SMTP_HOST:?production magic links require SMTP}
+      APP_SMTP_PORT: ${APP_SMTP_PORT:-587}
+      APP_SMTP_USERNAME: ${APP_SMTP_USERNAME:-}
+      APP_SMTP_PASSWORD: ${APP_SMTP_PASSWORD:-}
+      APP_MAIL_FROM: ${APP_MAIL_FROM:?set APP_MAIL_FROM}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: "true"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "true"
+
+      # AuthConfigurationValidator refuses to start a production API without Turnstile.
+      APP_CHALLENGE_MODE: ${APP_CHALLENGE_MODE:-turnstile}
+      APP_TURNSTILE_SITE_KEY: ${APP_TURNSTILE_SITE_KEY:-}
+      APP_TURNSTILE_SECRET: ${APP_TURNSTILE_SECRET:-}
+      APP_TURNSTILE_EXPECTED_HOSTNAME: ${APP_TURNSTILE_EXPECTED_HOSTNAME:-}
+
+      APP_GOOGLE_CLIENT_ID: ${APP_GOOGLE_CLIENT_ID:-}
+      APP_GOOGLE_CLIENT_SECRET: ${APP_GOOGLE_CLIENT_SECRET:-}
+      APP_GOOGLE_REDIRECT_URI: ${APP_GOOGLE_REDIRECT_URI:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    restart: unless-stopped
+
+  backend-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      <<: *backend-env
+      APP_RUNTIME_ROLE: worker
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      # Flyway runs on whichever role starts first; letting the API migrate keeps one writer.
+      backend-api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      BACKEND_UPSTREAM: backend-api:8080
+    ports:
+      - "${PUBLIC_PORT:-8080}:8080"
+    depends_on:
+      backend-api: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
