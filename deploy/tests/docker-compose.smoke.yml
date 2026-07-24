@@ -1,0 +1,30 @@
+# Smoke-rehearsal override for the deploy scripts. Used ONLY by deploy/tests/smoke-rehearsal.sh as
+# the COMPOSE_OVERRIDE, standing in for the VM network override. It relaxes the production-only app
+# configuration (production profile, R2, Turnstile) so the REAL image built from source can reach
+# readiness locally, letting the rehearsal exercise the deploy/rollback scripts end to end. It is
+# NOT a deployment topology and must never be transferred to a real VM.
+services:
+  backend-api:
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      APP_STORAGE_PROVIDER: "local"
+      APP_STORAGE_LOCAL_ROOT: "/var/lib/event-capture/storage"
+      APP_STORAGE_PUBLIC_BASE_URL: ""
+      APP_MEDIA_PROCESSOR: "java"
+      APP_CHALLENGE_MODE: "off"
+      APP_SESSION_SECURE_COOKIES: "false"
+    volumes:
+      - smoke-storage:/var/lib/event-capture/storage
+
+  backend-worker:
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      APP_STORAGE_PROVIDER: "local"
+      APP_STORAGE_LOCAL_ROOT: "/var/lib/event-capture/storage"
+      APP_STORAGE_PUBLIC_BASE_URL: ""
+      APP_MEDIA_PROCESSOR: "java"
+    volumes:
+      - smoke-storage:/var/lib/event-capture/storage
+
+volumes:
+  smoke-storage:

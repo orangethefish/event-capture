@@ -1,0 +1,33 @@
+# Local-build developer override for the image-driven root docker-compose.yml.
+#
+# The base compose pulls released, digest-pinned images from Harbor. This override restores the
+# `build:` contexts and provides default local image tags so developers can build and run the
+# full single-origin stack without a registry:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Build prerequisites (the Dockerfiles copy pre-built artifacts):
+#   cd backend  && ./gradlew bootJar
+#   cd frontend && npm ci && npm run build -- --configuration production
+#
+# EVENT_CAPTURE_*_IMAGE stay optional here: the :- defaults name the locally built images, and
+# they are also honored if you happen to have those variables set.
+
+services:
+  backend-api:
+    image: ${EVENT_CAPTURE_BACKEND_IMAGE:-event-capture-backend:local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+  backend-worker:
+    image: ${EVENT_CAPTURE_BACKEND_IMAGE:-event-capture-backend:local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+  frontend:
+    image: ${EVENT_CAPTURE_FRONTEND_IMAGE:-event-capture-frontend:local}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile

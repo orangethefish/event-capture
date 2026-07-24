@@ -1,0 +1,170 @@
+// Root deployment-only pipeline. Invoked ONLY by the root release pipeline (event-capture/root)
+// via `build job: 'event-capture-deploy'`. It never builds or scans images and accepts no image
+// names or free-form shell arguments: it takes four validated parameters and constructs the
+// Harbor image references itself.
+//
+// It checks out the root repo at ROOT_COMMIT, asserts the release tag points at that commit,
+// generates a NON-SECRET release.env + release-manifest.json, transfers only the release bundle to
+// the VM (compose files, VM network override, deploy/health scripts, release.env, manifest), and
+// runs the controlled update over SSH. It never transfers .env, Harbor pull credentials, TLS
+// certificates or host nginx configuration.
+//
+// Required Jenkins configuration:
+//   - Global env: HARBOR_REGISTRY, HARBOR_PROJECT, DEPLOY_SSH_HOST, DEPLOY_SSH_USER,
+//                 PUBLIC_PORT (optional, default 8080), ROOT_REPO_URL (git remote of the root repo)
+//   - Credentials: bitbucket-scm-read (SSH, SCM read), prod-ssh-key (SSH, VM deploy user),
+//                  prod-known-hosts (secret file, pinned VM host keys)
+//   - Agents providing: git, docker compose config only for local validation (not required), curl
+
+pipeline {
+	agent any
+
+	options {
+		skipDefaultCheckout(true)
+		timestamps()
+	}
+
+	parameters {
+		string(name: 'RELEASE_TAG', defaultValue: '', description: 'Release tag, strict SemVer vX.Y.Z')
+		string(name: 'ROOT_COMMIT', defaultValue: '', description: 'Root repo commit (40 hex) the tag points at')
+		string(name: 'BACKEND_IMAGE_DIGEST', defaultValue: '', description: 'Backend image digest sha256:<64 hex>')
+		string(name: 'FRONTEND_IMAGE_DIGEST', defaultValue: '', description: 'Frontend image digest sha256:<64 hex>')
+	}
+
+	environment {
+		BACKEND_MIGRATIONS = 'backend/src/main/resources/db/migration'
+	}
+
+	stages {
+		stage('Validate Parameters') {
+			steps {
+				script {
+					if (!(params.RELEASE_TAG ==~ /^v\d+\.\d+\.\d+$/)) {
+						error("RELEASE_TAG '${params.RELEASE_TAG}' is not strict SemVer vX.Y.Z")
+					}
+					if (!(params.ROOT_COMMIT ==~ /^[0-9a-f]{40}$/)) {
+						error('ROOT_COMMIT must be a 40-character lowercase hex commit')
+					}
+					if (!(params.BACKEND_IMAGE_DIGEST ==~ /^sha256:[0-9a-f]{64}$/)) {
+						error('BACKEND_IMAGE_DIGEST must be sha256:<64 hex>')
+					}
+					if (!(params.FRONTEND_IMAGE_DIGEST ==~ /^sha256:[0-9a-f]{64}$/)) {
+						error('FRONTEND_IMAGE_DIGEST must be sha256:<64 hex>')
+					}
+					if (!env.HARBOR_REGISTRY?.trim() || !env.HARBOR_PROJECT?.trim()) {
+						error('HARBOR_REGISTRY and HARBOR_PROJECT must be configured in Jenkins.')
+					}
+					if (!env.DEPLOY_SSH_HOST?.trim() || !env.DEPLOY_SSH_USER?.trim()) {
+						error('DEPLOY_SSH_HOST and DEPLOY_SSH_USER must be configured in Jenkins.')
+					}
+				}
+			}
+		}
+
+		stage('Checkout Root @ Commit + Verify Tag') {
+			steps {
+				deleteDir()
+				checkout scm
+				sshagent(['bitbucket-scm-read']) {
+					sh '''
+						set -eu
+						mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+						ssh-keyscan -H bitbucket.org >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+						git fetch --tags --force origin
+						git checkout --detach "$ROOT_COMMIT"
+						# The tag must point at exactly the commit we were told to deploy.
+						git tag --points-at HEAD | grep -Fxq "$RELEASE_TAG" \
+							|| { echo "tag $RELEASE_TAG does not point at $ROOT_COMMIT" >&2; exit 1; }
+						# Backend submodule is needed for the Flyway fingerprint; frontend is not.
+						git submodule sync backend
+						git submodule update --init backend
+					'''
+				}
+			}
+		}
+
+		stage('Generate Release Bundle') {
+			steps {
+				script {
+					def registry = env.HARBOR_REGISTRY.trim()
+					def project = env.HARBOR_PROJECT.trim()
+					def publicPort = env.PUBLIC_PORT?.trim() ?: '8080'
+					env.BACKEND_IMAGE_REF = "${registry}/${project}/event-capture-backend@${params.BACKEND_IMAGE_DIGEST}"
+					env.FRONTEND_IMAGE_REF = "${registry}/${project}/event-capture-frontend@${params.FRONTEND_IMAGE_DIGEST}"
+					env.PUBLIC_PORT_RESOLVED = publicPort
+
+					def backendCommit = sh(script: 'git rev-parse "HEAD:backend"', returnStdout: true).trim()
+					def frontendCommit = sh(script: 'git rev-parse "HEAD:frontend"', returnStdout: true).trim()
+
+					sh """
+						deploy/ci/generate-release-env.sh \
+							--release-tag ${params.RELEASE_TAG} \
+							--backend-image ${env.BACKEND_IMAGE_REF} \
+							--frontend-image ${env.FRONTEND_IMAGE_REF} \
+							--public-port ${publicPort} \
+							--migrations-dir ${env.BACKEND_MIGRATIONS} \
+							--output release.env
+					"""
+					sh """
+						deploy/ci/generate-release-manifest.sh \
+							--release-tag ${params.RELEASE_TAG} \
+							--root-commit ${params.ROOT_COMMIT} \
+							--backend-commit ${backendCommit} \
+							--frontend-commit ${frontendCommit} \
+							--backend-image ${env.BACKEND_IMAGE_REF} \
+							--frontend-image ${env.FRONTEND_IMAGE_REF} \
+							--backend-digest ${params.BACKEND_IMAGE_DIGEST} \
+							--frontend-digest ${params.FRONTEND_IMAGE_DIGEST} \
+							--migrations-dir ${env.BACKEND_MIGRATIONS} \
+							--output release-manifest.json
+					"""
+
+					// Assemble ONLY the allowed bundle members. No .env, no pull creds, no certs,
+					// no host nginx configuration.
+					sh '''
+						set -eu
+						BUNDLE="bundle/$RELEASE_TAG"
+						rm -rf "$BUNDLE"
+						mkdir -p "$BUNDLE/deploy"
+						cp docker-compose.yml docker-compose.vm.yml release.env release-manifest.json "$BUNDLE/"
+						cp deploy/lib.sh deploy/deploy.sh deploy/rollback.sh deploy/preflight.sh \
+						   deploy/backup.sh deploy/health.sh "$BUNDLE/deploy/"
+					'''
+				}
+				archiveArtifacts artifacts: 'release.env, release-manifest.json', fingerprint: true
+			}
+		}
+
+		stage('Transfer & Controlled Update') {
+			steps {
+				withCredentials([file(credentialsId: 'prod-known-hosts', variable: 'KNOWN_HOSTS')]) {
+					sshagent(['prod-ssh-key']) {
+						sh '''
+							set -eu
+							TARGET="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+							SSH_OPTS="-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$KNOWN_HOSTS"
+							REL="/opt/event-capture/releases/$RELEASE_TAG"
+
+							ssh $SSH_OPTS "$TARGET" "mkdir -p '$REL'"
+							scp $SSH_OPTS -r "bundle/$RELEASE_TAG/." "$TARGET:$REL/"
+							# deploy.sh takes only the validated release tag as a positional argument.
+							ssh $SSH_OPTS "$TARGET" "sh '$REL/deploy/deploy.sh' '$RELEASE_TAG'"
+
+							# Bring back the on-VM deployment record for archival.
+							mkdir -p vm-record
+							scp $SSH_OPTS \
+								"$TARGET:$REL/deployed-images.txt" \
+								"$TARGET:$REL/health.txt" \
+								vm-record/ 2>/dev/null || true
+						'''
+					}
+				}
+			}
+			post {
+				always {
+					archiveArtifacts allowEmptyArchive: true, artifacts: 'vm-record/**'
+				}
+			}
+		}
+	}
+}

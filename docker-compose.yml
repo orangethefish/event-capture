@@ -6,12 +6,19 @@
 # same scheme://host:port. The `frontend` service proxies /api/v1, /login/oauth2 and
 # /actuator to `backend-api` (see frontend/nginx.conf.template).
 #
-# Prerequisites:
-#   cd backend  && ./gradlew bootJar
-#   cd frontend && npm ci && npm run build -- --configuration production
-#   cp env.example .env   # then fill in real secrets
+# This file is IMAGE-DRIVEN. backend-api, backend-worker and frontend pull released,
+# digest-pinned images from Harbor via EVENT_CAPTURE_BACKEND_IMAGE / EVENT_CAPTURE_FRONTEND_IMAGE.
+# Those are generated per release into release.env by the deploy job and layered on top of the
+# VM's shared/production.env secrets:
 #
-# Then: docker compose up -d
+#   docker compose --env-file /opt/event-capture/shared/production.env \
+#                  --env-file /opt/event-capture/releases/vX.Y.Z/release.env \
+#                  -f docker-compose.yml -f docker-compose.vm.yml up -d
+#
+# For a local build workflow (no Harbor), use the build override, which restores build: contexts
+# and default local image tags:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 name: event-capture
 
@@ -92,9 +99,9 @@ services:
     restart: unless-stopped
 
   backend-api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # Released, digest-pinned image from Harbor. The deploy job writes EVENT_CAPTURE_BACKEND_IMAGE
+    # into the per-release release.env; developers get a local build via docker-compose.build.yml.
+    image: ${EVENT_CAPTURE_BACKEND_IMAGE}
     environment:
       <<: *backend-env
       APP_RUNTIME_ROLE: api
@@ -134,9 +141,8 @@ services:
     restart: unless-stopped
 
   backend-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # Same image as backend-api, different runtime role.
+    image: ${EVENT_CAPTURE_BACKEND_IMAGE}
     environment:
       <<: *backend-env
       APP_RUNTIME_ROLE: worker
@@ -154,9 +160,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ${EVENT_CAPTURE_FRONTEND_IMAGE}
     environment:
       BACKEND_UPSTREAM: backend-api:8080
     ports:
