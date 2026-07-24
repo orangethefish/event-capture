@@ -19,6 +19,11 @@ x-backend-env: &backend-env
   APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL to the public origin}
   APP_FRONTEND_ORIGIN: ${APP_FRONTEND_ORIGIN:?set APP_FRONTEND_ORIGIN to the same public origin}
 
+  # Without this, AuthConfigurationValidator and StorageConfigurationValidator's entire
+  # production hard-fail block (placeholder secrets, missing Turnstile, non-empty public asset
+  # base URL, out-of-range R2 presign TTL, ...) never runs and a misconfiguration boots silently.
+  SPRING_PROFILES_ACTIVE: production
+
   APP_DATASOURCE_URL: jdbc:postgresql://postgres:5432/event_capture
   APP_DATASOURCE_USERNAME: ${POSTGRES_USER:-event_capture}
   APP_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
@@ -34,7 +39,7 @@ x-backend-env: &backend-env
 
   # Trust X-Forwarded-For only from the compose network, otherwise ClientIpResolver would
   # attribute every request to the nginx container and collapse the per-IP abuse limits.
-  APP_HTTP_TRUSTED_PROXY_CIDRS: ${APP_HTTP_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
+  APP_HTTP_TRUSTED_PROXY_CIDRS: ${APP_HTTP_TRUSTED_PROXY_CIDRS:-172.28.0.0/24}
 
   # Generate with `openssl rand -base64 32`.
   APP_ABUSE_KEY_SECRET: ${APP_ABUSE_KEY_SECRET:?a dedicated abuse-key secret is required}
@@ -155,7 +160,10 @@ services:
     environment:
       BACKEND_UPSTREAM: backend-api:8080
     ports:
-      - "${PUBLIC_PORT:-8080}:8080"
+      # Loopback only: the public path is Cloudflare -> host nginx -> 127.0.0.1. Publishing on
+      # 0.0.0.0 would let traffic reach the app directly, bypassing TLS termination and Cloudflare's
+      # proxy/WAF entirely.
+      - "127.0.0.1:${PUBLIC_PORT:-8080}:8080"
     depends_on:
       backend-api: { condition: service_healthy }
     restart: unless-stopped

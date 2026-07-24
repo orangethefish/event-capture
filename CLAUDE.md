@@ -56,7 +56,8 @@
 - Export archive entry names are normalized to traversal-safe basenames with deterministic duplicate suffixes.
 - Actuator liveness remains process-focused, while readiness includes the database and the mode-aware Redis health contributor.
 - Host APIs for event list/create/get/update, host photo feed, moderation, export-job creation/status, and export download with expiry enforcement.
-- Public APIs for event lookup, guest session create/resume, gallery feed, SSE stream subscription, upload init, multipart part URL issuance, binary upload endpoints, multipart complete, finalize, and public asset fetch.
+- Host event counts are served by `com.eventcapture.backend.stats.EventStatsService`, which lives outside `event` because it reads the `media` and `guest` repositories and both of those already depend on `event`. The batched list path uses one grouped query per repository rather than one per event.
+- Public APIs for event lookup, guest session create/resume, read-only cookie-based guest session resume, gallery feed, SSE stream subscription, upload init, multipart part URL issuance, binary upload endpoints, multipart complete, finalize, and public asset fetch.
 - OpenAPI is exposed through Springdoc on the API role.
 - Phase 3 lifecycle behavior is implemented: mandatory close times for new events, closure-time retention snapshots, tri-state PATCH semantics, and compound opaque feed cursors.
 - Share tokens are persisted only as a SHA-256 lookup hash plus AES-256-GCM ciphertext and key ID. Host share paths decrypt the original token; public lookup remains hash-based and existing API paths/shapes are unchanged.
@@ -165,6 +166,11 @@
   - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenReleaseBPreflightService.java`
   - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenDatabaseKeyringValidator.java`
   - `backend/src/main/java/com/eventcapture/backend/host/HostController.java`
+- Host event counts:
+  - `backend/src/main/java/com/eventcapture/backend/stats/EventStatsService.java`
+  - `backend/src/main/java/com/eventcapture/backend/stats/EventStatsResponse.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/EventPhotoCounts.java`
+  - `backend/src/main/java/com/eventcapture/backend/guest/EventGuestCounts.java`
 - Public guest flow:
   - `backend/src/main/java/com/eventcapture/backend/guest/PublicEventController.java`
   - `backend/src/main/java/com/eventcapture/backend/guest/GuestSessionService.java`
@@ -244,8 +250,10 @@
 
 - `GET /api/v1/host/events`
 - `POST /api/v1/host/events`
+- `GET /api/v1/host/events/stats`
 - `GET /api/v1/host/events/{eventId}`
 - `PATCH /api/v1/host/events/{eventId}`
+- `GET /api/v1/host/events/{eventId}/stats`
 - `GET /api/v1/host/events/{eventId}/photos`
 - `POST /api/v1/host/events/{eventId}/photos/{photoId}/hide`
 - `POST /api/v1/host/events/{eventId}/photos/{photoId}/unhide`
@@ -255,6 +263,8 @@
 - `GET /api/v1/host/events/{eventId}/exports/{exportId}/download`
 - Current contract notes:
   - event responses expose `lifecycleState`, closure snapshot, applied retention days, `retentionExpiresAt`, `galleryEnabled`, and `galleryAvailable`; these fields are the host-settings privacy contract
+  - `EventStatsResponse` is `{eventId, photoCount, hiddenPhotoCount, guestCount, photosLast24hCount}`. Counts exclude `DELETED` photos and include hidden and still-processing ones, because those are photos the host still owns. `photosLast24hCount` is a rolling 24-hour window rather than a calendar day: events carry no timezone, so "today" is not answerable server-side and the UI says "Last 24h". `EventResponse` and `EventSummaryResponse` are deliberately unchanged, so the write paths carry no count queries.
+  - the batched `GET /api/v1/host/events/stats` returns one row per owned event, including an all-zero row for an event with no photos and no guests, so a client never has to tell "no photos" apart from "no data". The literal `/stats` segment takes routing precedence over the `/{eventId}` template.
   - export creation returns RFC 9457 `410 Gone` after event retention expiry
   - expired exports no longer expose `downloadUrl`
   - export download returns `410 Gone` after `archiveExpiresAt`; successful ZIP responses use attachment, private/no-store, and `nosniff` headers
@@ -262,6 +272,7 @@
 ### Public
 
 - `GET /api/v1/public/events/{slug}/{shareToken}`
+- `GET /api/v1/public/events/{slug}/{shareToken}/guest-session`
 - `POST /api/v1/public/events/{slug}/{shareToken}/guest-session`
 - `GET /api/v1/public/events/{slug}/{shareToken}/photos`
 - `GET /api/v1/public/events/{slug}/{shareToken}/stream`
@@ -274,6 +285,7 @@
 - `GET /api/v1/public/assets/{publicToken}`
 - Current contract notes:
   - the public event payload exposes `scheduledUploadOpenAt` alongside `scheduledUploadCloseAt`, so the guest page can say *when* uploads open instead of only that they are shut. It deliberately does not expose `uploadsClosedAt`; a guest UI must not report a still-future scheduled close as the moment uploads ended.
+  - `GET .../guest-session` resumes from the `event_capture_guest` cookie alone and returns the same `GuestSessionResponse` shape. It is read-only: it neither extends the session nor reissues the cookie, and `POST` remains the only mutating path. An absent, unknown, foreign or expired cookie answers `204 No Content`, not `401` - having no session is the normal first-visit state, not an error.
   - `uploads/init` accepts optional `checksumSha256` (64 hexadecimal characters) and returns `requiredHeaders` for single-part direct upload flows.
   - multipart part numbers are limited to the calculated part count; completion requires the exact contiguous part set and is idempotent.
   - `uploads/{uploadId}/parts` returns `requiredHeaders` for multipart part uploads.
@@ -306,7 +318,7 @@
 
 ### Implemented
 
-- Angular 19 standalone-component application with signals, lazy-loaded host and guest feature routes, and a shared component library under `src/app/shared/components`.
+- Angular 19 standalone-component application with signals, lazy-loaded host and guest feature routes, a shared component library under `src/app/shared/components`, and guest-only screen components under `src/app/features/guest/components`.
 - Host surface: magic-link and Google sign-in, event list/create/edit, event overview, QR/share dialog, moderation grid, and export create/poll/download.
 - Guest surface: share-link resolution, display-name join, camera-roll upload with progress and retry, live gallery, and photo viewer.
 - Typed API models in `src/app/core/models` mirroring the backend records exactly, with shared typed fixtures in `src/testing/fixtures.ts`.
@@ -320,12 +332,25 @@
 - `IconComponent` wraps its geometry in `bypassSecurityTrustHtml`. This is load-bearing, not a shortcut: Angular's HTML sanitizer allowlists HTML elements only, so an unwrapped `[innerHTML]` binding strips every `path`/`circle`/`rect` and renders empty `<svg>` boxes app-wide. The bypass is safe because `name` is only a lookup key into a fixed constant map and an unknown key yields an empty string. `icon.component.spec.ts` asserts on the rendered DOM, not on the string map, because a map-only assertion is what let the original bug ship green.
 - Guest upload availability is a rendered state, never an absence. When `uploadsOpen` is false the guest page explains why (scheduled, closed, expired) and, for a scheduled window, when uploads open; it also re-reads the event at the next lifecycle boundary within a two-hour horizon so the CTA appears without a reload.
 - Every rendered control does something. The host uploads switch PATCHes `manualOverrideState` (`FORCE_OPEN`/`FORCE_CLOSED`) and takes its state from the response; Preview opens the real guest URL; the guest top bar shares via `navigator.share` with a clipboard fallback and opens the QR dialog; the photo viewer offers only Save, because reactions have no backend contract.
+- The host surface renders real counts. Event detail reads `GET /api/v1/host/events/{eventId}/stats`, the event list reads the batched `GET /api/v1/host/events/stats` and keys it by `eventId`, and a failed counts request degrades to zeros without taking the page down. The "Today" tile is now "Last 24h" to match the backend's rolling window, and the "Viewing now" tile is gone: no endpoint exposes SSE subscriber counts.
+- A returning guest is resumed, not re-asked. `guest-event` calls `GuestSessionService.resume()` on load, which reads the `event_capture_guest` cookie through the read-only `GET .../guest-session`; a `204` is the ordinary first-visit answer and falls through to the join screen.
+- Component inputs that drive layout must be asserted on the measured box. `app-button`'s `fullWidth` was styled with `:host([fullWidth])`, an *attribute* selector, while all twelve call sites bind the *property* `[fullWidth]="true"` - Angular never reflects that to an attribute, so every "full width" button silently shrink-to-fit, including the login and guest-join CTAs. It is now a host class binding (`[class.full-width]`), and `button.component.spec.ts` asserts the rendered width against a fixed-width parent.
+- Responsive rules for a page belong in one `@media` block at the bottom of its stylesheet, not nested per rule: each nested `@media` re-emits its whole selector chain, and `event-detail.component.scss` (5.29 kB) is the largest component stylesheet and the closest to the 6 kB component-style warning. The host top bar has the same responsive treatment on all five host pages (shrinkable left side, truncated breadcrumb with the trail hidden, tightened padding); it is copy-pasted rather than shared, so a change to one belongs in all five.
 - Component styles must not use bare element selectors when the same tag is nested in the template. Emulated encapsulation rewrites `span { … }` to `span[_ngcontent-x]`, which still matches every descendant `span` in the component - it is scoped to the component, not to one element. `badge.component.ts` hit this: the badge's `padding: 4px 10px` landed on the nested status dot, whose `width: 7px` then floored at the padding under border-box sizing and rendered a 20x8 pill instead of a 7px circle. Use `:host > span`. The badge spec asserts the dot's measured box, because class-presence assertions cannot see this class of bug.
+- Every grid track is `minmax(0, …)` and every element rendering user input has `overflow-wrap: anywhere`. A bare `fr` floors at min-content, so one unbreakable string drags the track past the viewport - the measured cause of event detail's 553px horizontal scroll at 412px wide. `event-list`, `event-form` and `event-settings` now use `minmax(0, …)` throughout, and the guest event title (rendered twice, at 36px and 27px) plus the photo viewer's contributor name wrap rather than overflow. Prefer `overflow-wrap: anywhere` over `break-word`: only `anywhere` also zeroes the intrinsic min-content width, which is what lets a flex chain shrink without a `min-width: 0` on every ancestor.
+- The `event-list` grid was **not** in fact broken, contrary to an earlier note here. `.event-card`'s `overflow: hidden` already zeroes the card's automatic minimum size, and the page was measured at zero overflow with a bare `1fr`. But that rule exists to clip the cover's rounded corners, not to hold the layout together: flipping it to `overflow: visible` puts the page at a measured 129px of horizontal scroll. The `minmax(0, …)` there is deliberate hardening against that coupling, not a bug fix.
+- The `anyComponentStyle` budget is `6 kB` warning / `10 kB` error, raised from `4 kB`/`8 kB`. The old 4 kB warning had been permanently exceeded by two ordinary page stylesheets, so it had stopped being signal. After the guest-page split (below) the production build is clean with zero budget warnings; the largest remaining stylesheet is `event-detail` at 5.29 kB, ~0.7 kB under the warning, so the next file to cross 6 kB is the one the warning is there to catch. Do not restore the 4 kB warning: it flagged files that were fine and trained everyone to ignore it.
+- The guest event page was split before the budget was raised, not instead of it. `guest-event.component.ts` was one component rendering five distinct screens, and its stylesheet was 7.99 kB - 2.1x the median page and one declaration from failing the build. The join screen, upload sheet and photo viewer are now standalone components under `features/guest/components/` with inline styles, each well under 3 kB, and the parent keeps only the gallery/home shell (3.62 kB). The split conserves total bytes exactly; it buys a maintainable ceiling, and the raised budget buys ordinary working room on top.
 
 ### Testing
 
-- 343 Karma/Jasmine specs: services, interceptors, guard, all shared components, all nine feature pages, plus `src/app/core/integration/` covering router + guard + interceptor seams together.
-- 32 Playwright end-to-end tests across desktop and mobile viewports, run against a real backend in the documented Redis-free local mode (H2, in-process jobs, local storage, `challenge.mode=off`, `auth.debug-token-exposure=true` so a host can sign in without SMTP).
+- 375 Karma/Jasmine specs: services, interceptors, guard, all shared components, all nine feature pages, the three extracted guest components (`guest-join`, `guest-upload-sheet`, `guest-photo-viewer`), plus `src/app/core/integration/` covering router + guard + interceptor seams together.
+- 46 Playwright end-to-end runs (23 specs across the desktop and mobile projects; 43 pass and the 3 phone-viewport specs are skipped on desktop), run against a real backend in the documented Redis-free local mode (H2, in-process jobs, local storage, `challenge.mode=off`, `auth.debug-token-exposure=true` so a host can sign in without SMTP).
+- Horizontal-scroll coverage is `expectNoHorizontalScroll(page, label)` in `e2e/support/api.ts`, asserted on the `mobile` project for event detail, the event list, the create form, the guest join screen and the guest gallery. All five seed `UNBREAKABLE_TITLE`, a title with **no spaces and no hyphens** - a browser breaks after either one unprompted, so a friendlier-looking title passes against broken CSS and proves nothing. This is the guard for a whole class of bug the component specs cannot see: a Karma fixture root is not viewport-constrained and media queries key off the real window width.
+- Every `signInHost` both requests **and consumes** a magic link, and the two are separate abuse operations. `playwright.config.ts` has to raise `magic-consume.ip.hard-deny-after` as well as the `magic-request` limits; without it the suite silently runs out of sign-ins partway through the second project and every later host test bounces to `/host/login` with no 429 anywhere to explain it.
+- `signInHost` therefore asserts **both** the consume response status and a follow-up `GET /api/v1/auth/me`, and neither replaces the other. `AuthController.completeMagicLink` enforces abuse before its try/catch, so a denial answers 429 `problem+json` instead of redirecting (caught by the status); an invalid or expired token redirects to an ordinary 200 failure page (caught only by the session check). Both were verified by temporarily lowering `magic-consume.ip.hard-deny-after` to 3 and confirming the suite fails *inside* `signInHost` naming `abuse-limit-exceeded` and `retryAfterSeconds`, rather than bouncing a later test to `/host/login`. Any newly added per-IP abuse operation will now surface here instead of hiding.
+- `npm run e2e` does not run on Windows (`e2e:backend` is `cd ../backend && ./gradlew bootJar -q`, which cmd.exe rejects). Build the jar from a POSIX shell and run `npx playwright test`.
+- Playwright's `reuseExistingServer` is on whenever `CI` is unset, so a `docker compose` stack holding port 8080 will silently absorb the whole suite. Stop it before running e2e locally.
 - `e2e/api-contract.spec.ts` asserts backend field names, enum values, unknown-field rejection, and the raw-versus-masked CSRF token behavior against the live API. Extend it whenever a new endpoint is consumed.
 
 ## Backend Workflow Rules
@@ -399,7 +424,7 @@
   - **Remove the Google Fonts CDN dependency.** `frontend/src/styles.scss` opens with an `@import url('https://fonts.googleapis.com/...')` for Newsreader, Hanken Grotesk and Space Mono. That contradicts the self-contained claim the QR renderer already honours, breaks the app's typography offline and on locked-down networks, leaks a request to a third party on every page load, and blocks adding a strict `Content-Security-Policy` to `frontend/nginx.conf.template`. Self-host the woff2 subsets under `frontend/public/` and declare `@font-face` locally.
   - **Fix the banner's doubled padding.** `banner.component.ts` has the same bare-selector defect the badge dot had: `div { padding: var(--space-3) var(--space-4); border-radius: ... }` is rewritten to `div[_ngcontent-x]` and so also matches the nested `.content` div, insetting the banner text by a second full pad. Scope it to `:host > div`. This is the only remaining instance - the shared components were audited for the pattern, and `challenge-dialog`'s two `<p>` are siblings rather than nested, so its bare `p` rule is intentional.
   - **Make the top-left wordmark a real home link.** `wordmark.component.ts` renders a bare `<span>OurRoll</span>` with no anchor, no route, and no logo mark, and it sits in the top bar of every host page plus the guest header. There is no affordance to get back: the host event-detail and moderation pages rely entirely on the small breadcrumb, and event-settings only has a back-link to its own event. Give the wordmark an optional `routerLink` (host pages to `/host/events`; the guest header should stay inert, since a guest has nowhere to navigate to) with focus-visible styling and a real hit area, and consider pairing the text with an actual logo mark.
-  - guest photo counts, guest counts, and "today" stats on the host overview and event cards are still placeholder zeros; no backend endpoint exposes them. Now that icons render these read as plainly wrong next to real photos, so they need either a counts endpoint or removal - they are the last placeholder content in the UI.
-  - a returning guest with a live `event_capture_guest` cookie is still shown the join screen and must retype their name; the page never calls `createOrResume` on load
+  - The `anyComponentStyle` budget question is **resolved**: the guest page was split into `guest-join`, `guest-upload-sheet` and `guest-photo-viewer` under `features/guest/components/`, and the budget was raised to `6 kB` warning / `10 kB` error. `event-detail.component.scss` (5.29 kB) is the only remaining warning and is deliberately left as the watch line. No further action is queued here.
+  - **`npm run e2e` does not work on Windows.** The `e2e:backend` script is `cd ../backend && ./gradlew bootJar -q`, which cmd.exe cannot run, so the command fails before Playwright starts. Run `./gradlew bootJar` from a POSIX shell and then `npx playwright test`, or make the script cross-platform.
   - the compose stack has not been exercised against real R2, SMTP, Turnstile, or Google OAuth credentials; only the local-mode stack has been run end to end
   - accessibility review (focus order, reduced motion, screen-reader labelling) has not been completed
