@@ -6,11 +6,11 @@ Event Capture reads Vault **only from the deployment VM**. Jenkins transfers a d
 
 On 2026-08-13, the local Vault is initialized and unsealed, with a KV v2 engine at `secret/`. It is currently a single-node deployment using file storage and Shamir unseal, so it is not HA and cannot recover unattended. Before making it the sole long-term production authority, migrate to durable integrated Raft storage, run a restore drill, and configure supported KMS/HSM auto-unseal.
 
-The server is listening on `127.0.0.1:8200` with TLS. The public endpoint is presently broken: Cloudflare forwards HTTP to that TLS listener and returns `Client sent an HTTP request to an HTTPS server`.
+The public endpoint at `https://vault.orangethefish.id.vn` is operational through a TLS-preserving Cloudflare configuration.
 
-## Required TLS remediation
+## TLS requirements
 
-1. Change Cloudflare SSL/TLS mode from **Flexible** to **Full (strict)**. Flexible must never front Vault.
+1. Keep Cloudflare SSL/TLS mode at **Full (strict)**. Flexible must never front Vault.
 2. Install a valid `vault.orangethefish.id.vn` certificate on the origin. A Cloudflare Origin CA certificate is acceptable for a Cloudflare-only endpoint; a public CA certificate also supports direct administrator access.
 3. Keep Vault bound to loopback and do not expose port 8200. The external edge/NAT path may forward 443 to 8200, but it must preserve TLS.
 4. Verify from a different machine, without `-k`:

@@ -26,7 +26,7 @@
 #   EVENT_CAPTURE_VAULT_ENABLED    default 0 (set 1 to fetch secrets from Vault before deploy)
 #   EVENT_CAPTURE_VAULT_ENV        default production (Vault secret path environment)
 
-OPT_ROOT="${EVENT_CAPTURE_ROOT:-/opt/event-capture}"
+OPT_ROOT="${EVENT_CAPTURE_ROOT:-/srv/event-capture}"
 SHARED_ENV="${EVENT_CAPTURE_SHARED_ENV:-$OPT_ROOT/shared/production.env}"
 COMPOSE_OVERRIDE="${EVENT_CAPTURE_COMPOSE_OVERRIDE:-docker-compose.vm.yml}"
 HEALTH_TIMEOUT="${EVENT_CAPTURE_HEALTH_TIMEOUT:-180}"

@@ -19,7 +19,7 @@
 set -euo pipefail
 
 DEPLOY_USER="${DEPLOY_USER:-deploy}"
-OPT_ROOT="${OPT_ROOT:-/opt/event-capture}"
+OPT_ROOT="${EVENT_CAPTURE_ROOT:-/srv/event-capture}"
 
 log() { printf '[provision] %s\n' "$*"; }
 die() { printf '[provision] ERROR: %s\n' "$*" >&2; exit 1; }

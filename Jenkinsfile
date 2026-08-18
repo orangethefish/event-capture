@@ -12,7 +12,7 @@
 //
 // Required Jenkins configuration:
 //   - Global env: HARBOR_REGISTRY (e.g. harbor.example.com), HARBOR_PROJECT (e.g. event-capture)
-//   - Credentials: bitbucket-scm-read (SSH), harbor-ci-robot (username/password)
+//   - Credentials: bitbucket-scm-read (SSH), harbor-credentials (username/password)
 //   - A downstream job named 'event-capture-deploy' (root Jenkinsfile.deploy)
 //   - Agents providing: JDK 21, Node 20+, Docker CLI + daemon, curl, jq
 
@@ -172,7 +172,7 @@ pipeline {
 							-t ${frontendImage}:${tag} frontend
 					"""
 
-					withCredentials([usernamePassword(credentialsId: 'harbor-ci-robot', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASSWORD')]) {
+					withCredentials([usernamePassword(credentialsId: 'harbor-credentials', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASSWORD')]) {
 						withEnv(["HARBOR_REGISTRY=${registry}"]) {
 							try {
 								sh 'echo "$HARBOR_PASSWORD" | docker login "$HARBOR_REGISTRY" --username "$HARBOR_USER" --password-stdin'
