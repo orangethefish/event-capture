@@ -67,11 +67,15 @@ pipeline {
 			steps {
 				deleteDir()
 				checkout scm
-				sshagent(['bitbucket-scm-read']) {
+				withCredentials([sshUserPrivateKey(
+					credentialsId: 'bitbucket-scm-read',
+					keyFileVariable: 'BITBUCKET_SSH_KEY'
+				)]) {
 					sh '''
 						set -eu
 						mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 						ssh-keyscan -H bitbucket.org >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+						export GIT_SSH_COMMAND="ssh -i \"$BITBUCKET_SSH_KEY\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$HOME/.ssh/known_hosts\""
 						git fetch --tags --force origin
 						git checkout --detach "$ROOT_COMMIT"
 						# The tag must point at exactly the commit we were told to deploy.
@@ -141,26 +145,28 @@ pipeline {
 		stage('Transfer & Controlled Update') {
 			steps {
 				withCredentials([file(credentialsId: 'prod-known-hosts', variable: 'KNOWN_HOSTS')]) {
-					sshagent(['prod-ssh-key']) {
+					withCredentials([sshUserPrivateKey(
+						credentialsId: 'prod-ssh-key',
+						keyFileVariable: 'DEPLOY_SSH_KEY'
+					)]) {
 						sh '''
 							set -eu
 							TARGET="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
-							SSH_OPTS="-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$KNOWN_HOSTS"
 							REL="/srv/event-capture/releases/$RELEASE_TAG"
 
-							ssh $SSH_OPTS "$TARGET" "mkdir -p '$REL'"
-							scp $SSH_OPTS -r "bundle/$RELEASE_TAG/." "$TARGET:$REL/"
+							ssh -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" "$TARGET" "mkdir -p '$REL'"
+							scp -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -r "bundle/$RELEASE_TAG/." "$TARGET:$REL/"
 							# deploy.sh takes only the validated release tag as a positional argument.
 							# Vault integration is controlled by environment variables.
 							VAULT_FLAG=""
 							if [ "${VAULT_ENABLED}" = "true" ]; then
 								VAULT_FLAG="EVENT_CAPTURE_VAULT_ENABLED=1 EVENT_CAPTURE_VAULT_ENV=${VAULT_ENV}"
 							fi
-							ssh $SSH_OPTS "$TARGET" "$VAULT_FLAG sh '$REL/deploy/deploy.sh' '$RELEASE_TAG'"
+							ssh -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" "$TARGET" "$VAULT_FLAG sh '$REL/deploy/deploy.sh' '$RELEASE_TAG'"
 
 							# Bring back the on-VM deployment record for archival.
 							mkdir -p vm-record
-							scp $SSH_OPTS \
+							scp -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" \
 								"$TARGET:$REL/deployed-images.txt" \
 								"$TARGET:$REL/health.txt" \
 								vm-record/ 2>/dev/null || true
