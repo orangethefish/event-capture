@@ -223,7 +223,7 @@ pipeline {
 			steps {
 				// Only reached after both pushes and both scan gates succeeded. Wait for the deploy
 				// result and propagate failure so a failed deploy fails this tag pipeline.
-				build job: 'event-capture-deploy', wait: true, propagate: true, parameters: [
+				build job: 'Event Capture/EC-deploy', wait: true, propagate: true, parameters: [
 					string(name: 'RELEASE_TAG', value: env.TAG_NAME),
 					string(name: 'ROOT_COMMIT', value: env.ROOT_COMMIT),
 					string(name: 'BACKEND_IMAGE_DIGEST', value: env.BACKEND_DIGEST),

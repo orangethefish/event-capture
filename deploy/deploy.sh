@@ -26,6 +26,10 @@ else
 fi
 
 preflight_checks "$RD"
+maybe_refresh_vault_secrets
+# Vault may have created shared/production.env during a first deployment. Validate the fully
+# layered Compose model only after that refresh so a missing local env file cannot block Vault.
+compose "$RD" config -q || die "docker compose config failed for $RD"
 start_dependencies "$RD"
 create_backup "$RD"
 fetch_app_images "$RD"

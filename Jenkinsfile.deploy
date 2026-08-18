@@ -29,6 +29,8 @@ pipeline {
 		string(name: 'ROOT_COMMIT', defaultValue: '', description: 'Root repo commit (40 hex) the tag points at')
 		string(name: 'BACKEND_IMAGE_DIGEST', defaultValue: '', description: 'Backend image digest sha256:<64 hex>')
 		string(name: 'FRONTEND_IMAGE_DIGEST', defaultValue: '', description: 'Frontend image digest sha256:<64 hex>')
+		booleanParam(name: 'VAULT_ENABLED', defaultValue: true, description: 'Fetch secrets from Vault before deployment')
+		choice(name: 'VAULT_ENV', choices: ['production', 'staging'], description: 'Vault secret environment path')
 	}
 
 	environment {
@@ -120,7 +122,8 @@ pipeline {
 					"""
 
 					// Assemble ONLY the allowed bundle members. No .env, no pull creds, no certs,
-					// no host nginx configuration.
+					// no host nginx configuration. vault.sh and vault-refresh.sh are included
+					// for optional Vault-based secret management.
 					sh '''
 						set -eu
 						BUNDLE="bundle/$RELEASE_TAG"
@@ -128,7 +131,7 @@ pipeline {
 						mkdir -p "$BUNDLE/deploy"
 						cp docker-compose.yml docker-compose.vm.yml release.env release-manifest.json "$BUNDLE/"
 						cp deploy/lib.sh deploy/deploy.sh deploy/rollback.sh deploy/preflight.sh \
-						   deploy/backup.sh deploy/health.sh "$BUNDLE/deploy/"
+						   deploy/backup.sh deploy/health.sh deploy/vault.sh deploy/vault-refresh.sh "$BUNDLE/deploy/"
 					'''
 				}
 				archiveArtifacts artifacts: 'release.env, release-manifest.json', fingerprint: true
@@ -148,7 +151,12 @@ pipeline {
 							ssh $SSH_OPTS "$TARGET" "mkdir -p '$REL'"
 							scp $SSH_OPTS -r "bundle/$RELEASE_TAG/." "$TARGET:$REL/"
 							# deploy.sh takes only the validated release tag as a positional argument.
-							ssh $SSH_OPTS "$TARGET" "sh '$REL/deploy/deploy.sh' '$RELEASE_TAG'"
+							# Vault integration is controlled by environment variables.
+							VAULT_FLAG=""
+							if [ "${VAULT_ENABLED}" = "true" ]; then
+								VAULT_FLAG="EVENT_CAPTURE_VAULT_ENABLED=1 EVENT_CAPTURE_VAULT_ENV=${VAULT_ENV}"
+							fi
+							ssh $SSH_OPTS "$TARGET" "$VAULT_FLAG sh '$REL/deploy/deploy.sh' '$RELEASE_TAG'"
 
 							# Bring back the on-VM deployment record for archival.
 							mkdir -p vm-record
