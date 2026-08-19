@@ -25,7 +25,6 @@ boolean isPointerChange() {
 }
 
 def initSubmodules() {
-	// Relative submodule URLs resolve to git@bitbucket.org:orangethefish/... over the read-only key.
 	// Use credentials binding rather than the optional SSH Agent plugin, which is not installed
 	// on the Jenkins controller.
 	withCredentials([sshUserPrivateKey(
@@ -40,6 +39,7 @@ def initSubmodules() {
 			export GIT_SSH_COMMAND="ssh -i \"$BITBUCKET_SSH_KEY\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$HOME/.ssh/known_hosts\""
 			git submodule sync --recursive
 			git submodule update --init --recursive
+			git submodule status --recursive
 		'''
 	}
 }
@@ -124,7 +124,7 @@ pipeline {
 					sh 'node --version'
 					sh 'npm ci'
 					sh 'npm run lint'
-					sh 'npm test -- --watch=false --browsers=ChromeHeadless'
+					sh 'bash ci/karma-ci.sh --watch=false --browsers=ChromeHeadlessNoSandbox'
 					sh 'npm run build -- --configuration production'
 				}
 			}
