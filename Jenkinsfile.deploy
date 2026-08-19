@@ -12,7 +12,7 @@
 // Required Jenkins configuration:
 //   - Global env: HARBOR_REGISTRY, HARBOR_PROJECT, DEPLOY_SSH_HOST, DEPLOY_SSH_USER,
 //                 PUBLIC_PORT (optional, default 8080), ROOT_REPO_URL (git remote of the root repo)
-//   - Credentials: bitbucket-scm-read (SSH, SCM read), prod-ssh-key (SSH, VM deploy user),
+//   - Credentials: prod-ssh-key (SSH, VM deploy user),
 //                  prod-known-hosts (secret file, pinned VM host keys)
 //   - Agents providing: git, docker compose config only for local validation (not required), curl
 
@@ -67,25 +67,17 @@ pipeline {
 			steps {
 				deleteDir()
 				checkout scm
-				withCredentials([sshUserPrivateKey(
-					credentialsId: 'bitbucket-scm-read',
-					keyFileVariable: 'BITBUCKET_SSH_KEY'
-				)]) {
-					sh '''
-						set -eu
-						mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
-						ssh-keyscan -H bitbucket.org >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
-						export GIT_SSH_COMMAND="ssh -i \"$BITBUCKET_SSH_KEY\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$HOME/.ssh/known_hosts\""
-						git fetch --tags --force origin
-						git checkout --detach "$ROOT_COMMIT"
-						# The tag must point at exactly the commit we were told to deploy.
-						git tag --points-at HEAD | grep -Fxq "$RELEASE_TAG" \
-							|| { echo "tag $RELEASE_TAG does not point at $ROOT_COMMIT" >&2; exit 1; }
-						# Backend submodule is needed for the Flyway fingerprint; frontend is not.
-						git submodule sync backend
-						git submodule update --init backend
-					'''
-				}
+				sh '''
+					set -eu
+					git fetch --tags --force origin
+					git checkout --detach "$ROOT_COMMIT"
+					# The tag must point at exactly the commit we were told to deploy.
+					git tag --points-at HEAD | grep -Fxq "$RELEASE_TAG" \
+						|| { echo "tag $RELEASE_TAG does not point at $ROOT_COMMIT" >&2; exit 1; }
+					# Backend submodule is needed for the Flyway fingerprint; frontend is not.
+					git submodule sync backend
+					git submodule update --init backend
+				'''
 			}
 		}
 

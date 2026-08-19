@@ -12,7 +12,7 @@
 //
 // Required Jenkins configuration:
 //   - Global env: HARBOR_REGISTRY (e.g. harbor.example.com), HARBOR_PROJECT (e.g. event-capture)
-//   - Credentials: bitbucket-scm-read (SSH), harbor-credentials (username/password)
+//   - Credentials: harbor-credentials (username/password)
 //   - A downstream job named 'event-capture-deploy' (root Jenkinsfile.deploy)
 //   - Agents providing: JDK 21, Node 20+, Docker CLI + daemon, curl, jq
 
@@ -25,23 +25,12 @@ boolean isPointerChange() {
 }
 
 def initSubmodules() {
-	// Use credentials binding rather than the optional SSH Agent plugin, which is not installed
-	// on the Jenkins controller.
-	withCredentials([sshUserPrivateKey(
-		credentialsId: 'bitbucket-scm-read',
-		keyFileVariable: 'BITBUCKET_SSH_KEY'
-	)]) {
-		sh '''
-			set -eu
-			mkdir -p "$HOME/.ssh"
-			chmod 700 "$HOME/.ssh"
-			ssh-keyscan -H bitbucket.org >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
-			export GIT_SSH_COMMAND="ssh -i \"$BITBUCKET_SSH_KEY\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$HOME/.ssh/known_hosts\""
-			git submodule sync --recursive
-			git submodule update --init --recursive
-			git submodule status --recursive
-		'''
-	}
+	sh '''
+		set -eu
+		git submodule sync --recursive
+		git submodule update --init --recursive
+		git submodule status --recursive
+	'''
 }
 
 pipeline {
@@ -88,7 +77,6 @@ pipeline {
 					sh 'node --version'
 					sh 'java -version'
 					sh 'npm ci'
-					sh 'npx playwright install --with-deps chromium'
 					sh 'npm run e2e'
 				}
 			}
