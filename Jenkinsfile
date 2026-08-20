@@ -45,7 +45,6 @@ pipeline {
 		BACKEND_REPO = 'event-capture-backend'
 		FRONTEND_REPO = 'event-capture-frontend'
 		BACKEND_MIGRATIONS = 'backend/src/main/resources/db/migration'
-		HARBOR_REGISTRY = credentials('registry-url')
 		HARBOR_PROJECT = 'duyhoa2210'
 	}
 
@@ -145,7 +144,8 @@ pipeline {
 					if (!registry || !project) {
 						error('HARBOR_REGISTRY and HARBOR_PROJECT must be configured in Jenkins.')
 					}
-					def api = "https://${registry}/api/v2.0"
+					def registryUrl = "https://${registry}"
+					def api = "${registryUrl}/api/v2.0"
 					def backendImageName = "${registry}/${project}/event-capture-backend"
 					def frontendImageName = "${registry}/${project}/event-capture-frontend"
 					def tag = env.TAG_NAME.trim()
@@ -154,7 +154,12 @@ pipeline {
 					dir('backend') { sh './gradlew --no-daemon bootJar' }
 					dir('frontend') { sh 'npm run build -- --configuration production' }
 
-					docker.withRegistry("https://${registry}", 'harbor-credentials') {
+					// docker.withRegistry needs a scheme'd URL (it resolves credentials via
+					// java.net.URL internally); docker.build's image tag must stay a bare
+					// host/path/tag with no scheme, or "docker build -t" rejects it as an
+					// invalid reference. HARBOR_REGISTRY itself is configured bare (see header
+					// comment) and both forms are derived from it here.
+					docker.withRegistry(registryUrl, 'harbor-credentials') {
 						// Build and push backend image
 						def backendImage = docker.build(
 							"${backendImageName}:${tag}",
