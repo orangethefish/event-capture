@@ -123,7 +123,7 @@ pipeline {
 			when { expression { isSemverTag() } }
 			steps {
 				dir('frontend') {
-					sh 'npx playwright install --with-deps chromium'
+					sh 'npx playwright install chromium'
 					sh 'npm run e2e'
 				}
 			}
