@@ -154,7 +154,7 @@ pipeline {
 					dir('backend') { sh './gradlew --no-daemon bootJar' }
 					dir('frontend') { sh 'npm run build -- --configuration production' }
 
-					docker.withRegistry("https://${registry}", 'harbor-credentials') {
+					docker.withRegistry(env.HARBOR_REGISTRY?.trim(), 'harbor-credentials') {
 						// Build and push backend image
 						def backendImage = docker.build(
 							"${backendImageName}:${tag}",
