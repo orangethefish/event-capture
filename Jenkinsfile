@@ -45,6 +45,8 @@ pipeline {
 		BACKEND_REPO = 'event-capture-backend'
 		FRONTEND_REPO = 'event-capture-frontend'
 		BACKEND_MIGRATIONS = 'backend/src/main/resources/db/migration'
+		HARBOR_REGISTRY = credentials('registry-url')
+		HARBOR_PROJECT = 'duyhoa2210'
 	}
 
 	stages {
@@ -144,51 +146,51 @@ pipeline {
 						error('HARBOR_REGISTRY and HARBOR_PROJECT must be configured in Jenkins.')
 					}
 					def api = "https://${registry}/api/v2.0"
-					def backendImage = "${registry}/${project}/event-capture-backend"
-					def frontendImage = "${registry}/${project}/event-capture-frontend"
+					def backendImageName = "${registry}/${project}/event-capture-backend"
+					def frontendImageName = "${registry}/${project}/event-capture-frontend"
 					def tag = env.TAG_NAME.trim()
 
 					// Ensure the artifacts the Dockerfiles copy are present from this pinned tree.
 					dir('backend') { sh './gradlew --no-daemon bootJar' }
 					dir('frontend') { sh 'npm run build -- --configuration production' }
 
-					sh """
-						docker build --pull -f backend/Dockerfile \
-							--build-arg SOURCE_COMMIT=${env.BACKEND_COMMIT} \
-							--build-arg SOURCE_REPO=${env.BACKEND_SOURCE_URL} \
-							--build-arg RELEASE_VERSION=${tag} \
-							-t ${backendImage}:${tag} backend
-					"""
-					sh """
-						docker build --pull -f frontend/Dockerfile \
-							--build-arg SOURCE_COMMIT=${env.FRONTEND_COMMIT} \
-							--build-arg SOURCE_REPO=${env.FRONTEND_SOURCE_URL} \
-							--build-arg RELEASE_VERSION=${tag} \
-							-t ${frontendImage}:${tag} frontend
-					"""
+					docker.withRegistry("https://${registry}", 'harbor-credentials') {
+						// Build and push backend image
+						def backendImage = docker.build(
+							"${backendImageName}:${tag}",
+							"--pull " +
+							"--build-arg SOURCE_COMMIT=${env.BACKEND_COMMIT} " +
+							"--build-arg SOURCE_REPO=${env.BACKEND_SOURCE_URL} " +
+							"--build-arg RELEASE_VERSION=${tag} " +
+							"-f backend/Dockerfile backend"
+						)
+						backendImage.push()
 
-					withCredentials([usernamePassword(credentialsId: 'harbor-credentials', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASSWORD')]) {
-						withEnv(["HARBOR_REGISTRY=${registry}"]) {
-							try {
-								sh 'echo "$HARBOR_PASSWORD" | docker login "$HARBOR_REGISTRY" --username "$HARBOR_USER" --password-stdin'
-								sh "docker push ${backendImage}:${tag}"
-								sh "docker push ${frontendImage}:${tag}"
-
-								// Harbor scan-on-push + poll. Fails on fixable Critical -> release stops before deploy.
-								sh "deploy/ci/harbor-scan-gate.sh --api ${api} --project ${project} --repository event-capture-backend --reference ${tag}"
-								sh "deploy/ci/harbor-scan-gate.sh --api ${api} --project ${project} --repository event-capture-frontend --reference ${tag}"
-
-								env.BACKEND_DIGEST = sh(script: "deploy/ci/harbor-digest.sh --api ${api} --project ${project} --repository event-capture-backend --reference ${tag}", returnStdout: true).trim()
-								env.FRONTEND_DIGEST = sh(script: "deploy/ci/harbor-digest.sh --api ${api} --project ${project} --repository event-capture-frontend --reference ${tag}", returnStdout: true).trim()
-								echo "backend digest ${env.BACKEND_DIGEST}, frontend digest ${env.FRONTEND_DIGEST}"
-							} finally {
-								sh 'docker logout "$HARBOR_REGISTRY" || true'
-							}
-						}
+						// Build and push frontend image
+						def frontendImage = docker.build(
+							"${frontendImageName}:${tag}",
+							"--pull " +
+							"--build-arg SOURCE_COMMIT=${env.FRONTEND_COMMIT} " +
+							"--build-arg SOURCE_REPO=${env.FRONTEND_SOURCE_URL} " +
+							"--build-arg RELEASE_VERSION=${tag} " +
+							"-f frontend/Dockerfile frontend"
+						)
+						frontendImage.push()
 					}
 
-					env.BACKEND_IMAGE_REF = "${backendImage}@${env.BACKEND_DIGEST}"
-					env.FRONTEND_IMAGE_REF = "${frontendImage}@${env.FRONTEND_DIGEST}"
+					// Harbor API calls need credentials as env vars (docker.withRegistry only sets Docker CLI auth)
+					withCredentials([usernamePassword(credentialsId: 'harbor-credentials', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASSWORD')]) {
+						// Harbor scan-on-push + poll. Fails on fixable Critical -> release stops before deploy.
+						sh "deploy/ci/harbor-scan-gate.sh --api ${api} --project ${project} --repository event-capture-backend --reference ${tag}"
+						sh "deploy/ci/harbor-scan-gate.sh --api ${api} --project ${project} --repository event-capture-frontend --reference ${tag}"
+
+						env.BACKEND_DIGEST = sh(script: "deploy/ci/harbor-digest.sh --api ${api} --project ${project} --repository event-capture-backend --reference ${tag}", returnStdout: true).trim()
+						env.FRONTEND_DIGEST = sh(script: "deploy/ci/harbor-digest.sh --api ${api} --project ${project} --repository event-capture-frontend --reference ${tag}", returnStdout: true).trim()
+						echo "backend digest ${env.BACKEND_DIGEST}, frontend digest ${env.FRONTEND_DIGEST}"
+					}
+
+					env.BACKEND_IMAGE_REF = "${backendImageName}@${env.BACKEND_DIGEST}"
+					env.FRONTEND_IMAGE_REF = "${frontendImageName}@${env.FRONTEND_DIGEST}"
 				}
 			}
 		}
