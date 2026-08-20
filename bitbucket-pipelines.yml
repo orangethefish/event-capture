@@ -9,7 +9,8 @@ pipelines:
           script:
             # 1. Fetch all origin branches and tags without touching checked-out HEAD
             - git fetch origin --prune
-            - git fetch origin --tags
+            # ADD --force HERE to allow overwriting rewritten tags locally
+            - git fetch origin --tags --force
             
             # 2. Delete the symbolic origin/HEAD ref so the wildcard doesn't catch it
             - git remote set-head origin -d || true

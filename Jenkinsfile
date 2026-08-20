@@ -45,7 +45,6 @@ pipeline {
 		BACKEND_REPO = 'event-capture-backend'
 		FRONTEND_REPO = 'event-capture-frontend'
 		BACKEND_MIGRATIONS = 'backend/src/main/resources/db/migration'
-		HARBOR_REGISTRY = credentials('registry-url')
 		HARBOR_PROJECT = 'duyhoa2210'
 	}
 
@@ -154,7 +153,7 @@ pipeline {
 					dir('backend') { sh './gradlew --no-daemon bootJar' }
 					dir('frontend') { sh 'npm run build -- --configuration production' }
 
-					docker.withRegistry("https://${registry}", 'harbor-credentials') {
+					docker.withRegistry(env.HARBOR_REGISTRY?.trim(), 'harbor-credentials') {
 						// Build and push backend image
 						def backendImage = docker.build(
 							"${backendImageName}:${tag}",
