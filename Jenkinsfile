@@ -77,6 +77,7 @@ pipeline {
 					sh 'node --version'
 					sh 'java -version'
 					sh 'npm ci'
+					sh 'npx playwright install chromium'
 					sh 'npm run e2e'
 				}
 			}
