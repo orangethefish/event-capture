@@ -37,15 +37,25 @@ done
 base="$api/projects/$project/repositories/$repository/artifacts/$reference"
 
 hcurl() {
-  curl -fsS --retry 3 --retry-delay 5 -u "$HARBOR_USER:$HARBOR_PASSWORD" "$@"
+  curl -sS --retry 3 --retry-delay 5 -u "$HARBOR_USER:$HARBOR_PASSWORD" -w '\n%{http_code}' "$@"
 }
 
 echo "polling Harbor scan status for $project/$repository:$reference (timeout ${timeout}s)" >&2
 end=$(( $(date +%s) + timeout ))
 status="Unknown"
 while :; do
-  overview=$(hcurl "$base?with_scan_overview=true" || echo '{}')
-  status=$(printf '%s' "$overview" | jq -r '[.scan_overview[]?.scan_status] | map(select(. != null)) | first // "Unknown"')
+  raw=$(hcurl "$base?with_scan_overview=true")
+  http_code=$(printf '%s' "$raw" | tail -n1)
+  overview=$(printf '%s' "$raw" | sed '$d')
+  case "$http_code" in
+    401|403)
+      echo "Harbor API returned HTTP $http_code reading $base" >&2
+      printf '%s\n' "$overview" >&2
+      echo "This is an authorization failure, not a scan-in-progress state, so it will not resolve by waiting: the 'harbor-credentials' account can push/pull (the earlier docker push succeeded) but lacks read access to Harbor's core REST API. Check the robot/user account's project permissions in Harbor (needs read on Repository/Artifact/Tag and the vulnerability report, not just push/pull), or confirm '/api/v2.0/*' is actually routed to Harbor by any reverse proxy in front of $api." >&2
+      exit 1
+      ;;
+  esac
+  status=$(printf '%s' "$overview" | jq -r '[.scan_overview[]?.scan_status] | map(select(. != null)) | first // "Unknown"' 2>/dev/null || echo "Unknown")
   case "$status" in
     Success) echo "scan finished: Success" >&2; break ;;
     Error|Stopped) echo "scan ended in state: $status" >&2; exit 1 ;;
