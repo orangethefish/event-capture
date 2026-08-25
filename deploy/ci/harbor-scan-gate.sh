@@ -43,6 +43,7 @@ hcurl() {
 echo "polling Harbor scan status for $project/$repository:$reference (timeout ${timeout}s)" >&2
 end=$(( $(date +%s) + timeout ))
 status="Unknown"
+logged_unknown=""
 while :; do
   raw=$(hcurl "$base?with_scan_overview=true")
   http_code=$(printf '%s' "$raw" | tail -n1)
@@ -59,6 +60,17 @@ while :; do
   case "$status" in
     Success) echo "scan finished: Success" >&2; break ;;
     Error|Stopped) echo "scan ended in state: $status" >&2; exit 1 ;;
+    Unknown)
+      if [ "$logged_unknown" != "1" ]; then
+        logged_unknown=1
+        has_scan_overview=$(printf '%s' "$overview" | jq 'has("scan_overview") and (.scan_overview != null) and (.scan_overview != {})')
+        echo "no recognizable scan_status yet; raw artifact response for diagnosis:" >&2
+        printf '%s\n' "$overview" >&2
+        if [ "$has_scan_overview" != "true" ]; then
+          echo "'scan_overview' is absent/empty, which means Harbor has not attached any scan to this artifact -- this will not resolve by waiting. Check in Harbor: Administration > Interrogation Services has a scanner registered (e.g. Trivy), and Project '$project' > Configuration has 'Automatically scan artifacts on push' enabled. As a one-off check, try manually clicking Scan on this artifact in the Harbor UI." >&2
+        fi
+      fi
+      ;;
   esac
   if [ "$(date +%s)" -ge "$end" ]; then
     echo "timed out waiting for scan to finish (last status: $status)" >&2
@@ -69,7 +81,14 @@ while :; do
 done
 
 # Precise fixable-Critical count from the full vulnerability report.
-report=$(hcurl "$base/additions/vulnerabilities")
+report_raw=$(hcurl "$base/additions/vulnerabilities")
+report_http_code=$(printf '%s' "$report_raw" | tail -n1)
+report=$(printf '%s' "$report_raw" | sed '$d')
+if [ "$report_http_code" != "200" ]; then
+  echo "Harbor API returned HTTP $report_http_code reading $base/additions/vulnerabilities" >&2
+  printf '%s\n' "$report" >&2
+  exit 1
+fi
 fixable_critical=$(printf '%s' "$report" | jq '[.[].vulnerabilities[]?
   | select(.severity == "Critical")
   | select(.fix_version != null and .fix_version != "")] | length')
