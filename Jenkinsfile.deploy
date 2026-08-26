@@ -159,6 +159,18 @@ pipeline {
 							TARGET="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
 							REL="/srv/event-capture/releases/$RELEASE_TAG"
 
+							# ssh parses UserKnownHostsFile as a WHITESPACE-SEPARATED LIST of files, and
+							# Jenkins hands us the credential at a workspace path - this job lives in a folder
+							# named "Event Capture", so that path contains a space. ssh therefore splits it
+							# into two nonexistent paths and reports every host key as unknown, while
+							# ssh-keygen -f (a single filename argument) reads the identical file without
+							# complaint. That mismatch is what made a correct credential look broken. Stage it
+							# where the path cannot contain a space. ssh -i is unaffected: it takes the
+							# identity file verbatim rather than as a list.
+							KNOWN_HOSTS_SAFE="$(mktemp)"
+							trap 'rm -f "$KNOWN_HOSTS_SAFE"' EXIT INT TERM
+							cat "$KNOWN_HOSTS" > "$KNOWN_HOSTS_SAFE"
+
 							# Fail fast, and legibly, when the pinned known_hosts credential is empty,
 							# malformed, or simply has no entry for DEPLOY_SSH_HOST. Without this the first
 							# symptom is ssh exit 255 "No ED25519 host key is known", which reads like a VM
@@ -166,24 +178,24 @@ pipeline {
 							# so printing the size and fingerprints here leaks nothing. Note that
 							# withCredentials(file:) writes the credential to a path and puts the PATH in
 							# $KNOWN_HOSTS - a Secret text credential of the same ID would not work here.
-							echo "known_hosts: $(wc -c < "$KNOWN_HOSTS") bytes"
-							ssh-keygen -lf "$KNOWN_HOSTS" || echo "WARNING: no parseable host keys in prod-known-hosts"
-							ssh-keygen -F "$DEPLOY_SSH_HOST" -f "$KNOWN_HOSTS" >/dev/null 2>&1 \
+							echo "known_hosts: $(wc -c < "$KNOWN_HOSTS_SAFE") bytes"
+							ssh-keygen -lf "$KNOWN_HOSTS_SAFE" || echo "WARNING: no parseable host keys in prod-known-hosts"
+							ssh-keygen -F "$DEPLOY_SSH_HOST" -f "$KNOWN_HOSTS_SAFE" >/dev/null 2>&1 \
 								|| { echo "prod-known-hosts contains no entry for $DEPLOY_SSH_HOST" >&2; exit 1; }
 
-							ssh -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" "$TARGET" "mkdir -p '$REL'"
-							scp -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -r "bundle/$RELEASE_TAG/." "$TARGET:$REL/"
+							ssh -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS_SAFE" "$TARGET" "mkdir -p '$REL'"
+							scp -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS_SAFE" -r "bundle/$RELEASE_TAG/." "$TARGET:$REL/"
 							# deploy.sh takes only the validated release tag as a positional argument.
 							# Vault integration is controlled by environment variables.
 							VAULT_FLAG=""
 							if [ "${VAULT_ENABLED}" = "true" ]; then
 								VAULT_FLAG="EVENT_CAPTURE_VAULT_ENABLED=1 EVENT_CAPTURE_VAULT_ENV=${VAULT_ENV}"
 							fi
-							ssh -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" "$TARGET" "$VAULT_FLAG sh '$REL/deploy/deploy.sh' '$RELEASE_TAG'"
+							ssh -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS_SAFE" "$TARGET" "$VAULT_FLAG sh '$REL/deploy/deploy.sh' '$RELEASE_TAG'"
 
 							# Bring back the on-VM deployment record for archival.
 							mkdir -p vm-record
-							scp -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" \
+							scp -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS_SAFE" \
 								"$TARGET:$REL/deployed-images.txt" \
 								"$TARGET:$REL/health.txt" \
 								vm-record/ 2>/dev/null || true
