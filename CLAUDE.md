@@ -92,7 +92,7 @@
 - `PROCESS_UPLOAD` distinguishes permanent invalid/corrupt media from transient storage, native-command, and dependency failures. Transient failures use bounded exponential retries and become terminal/DLQ-visible only after exhaustion.
 - Upload worker media inspection verifies JPEG, PNG, WEBP, HEIC, and HEIF signatures against the declared MIME type, rejects truncated/spoofed content, validates encoded/decoded dimensions and pixel limits, and normalizes JPEG EXIF orientation before publishing.
 - Native media commands have a 60-second timeout and bounded diagnostic output.
-- The media variant pipeline is selected through `APP_MEDIA_PROCESSOR=java|libvips`: Java remains the portable local/test fallback, while the root `docker-compose.yml` selects libvips for bounded auto-rotating, metadata-stripping re-encoding. Production images include `libvips-tools`, HEIF, and WEBP helpers.
+- The media variant pipeline is selected through `APP_MEDIA_PROCESSOR=java|libvips`: Java remains the portable local/test fallback, while the root `docker-compose.yml` selects libvips for bounded auto-rotating, metadata-stripping re-encoding. Production images supply `vips`, `heif-convert` and `dwebp` from Alpine's `vips-tools`, `vips-heif`, `libheif-tools` and `libwebp-tools`.
 - Export jobs are now executed asynchronously and can return a signed or local download URL once `READY`. Duplicate builds take a pessimistic export-job lock, use a deterministic archive key, and remove that key on terminal failure even if its database path did not commit.
 - Phase 6 moderation uses one pessimistic photo lock across moderation, media processing, and deleted-photo purge. Only `VISIBLE -> HIDDEN`, `HIDDEN -> VISIBLE`, and `VISIBLE|HIDDEN -> DELETED` change state; repeated actions are no-op `204` responses, deletion is terminal, and the first `deletedAt` remains immutable.
 - Public asset delivery applies `no-store`, `no-cache`, zero-age, `Pragma`, `Expires`, and `nosniff` headers through an API-role filter for every GET/HEAD success or error. Hidden, deleted, non-ready, gallery-disabled, retention-expired, purged, and unknown assets remain indistinguishable `404` responses.
@@ -132,6 +132,165 @@
 - Use npm and the Angular CLI for frontend work. The wireframe/design pause has been lifted.
 - Serve the SPA and the API from a single origin; do not reintroduce a split `api.`/`app.` topology while session cookies remain `SameSite=Lax`.
 - Backend DTOs are authoritative for every wire shape. The frontend adapts; do not change a backend record to match a hand-authored TypeScript model.
+
+## Important Backend Files
+
+- App entry/config:
+  - `backend/src/main/java/com/eventcapture/backend/EventCaptureBackendApplication.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/AppProperties.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/ApiSecurityConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/WorkerSecurityConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/SessionConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/LocalSessionConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/RedisSessionConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/RuntimeInfrastructureValidator.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/config/InfrastructureHealthConfig.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/storage/StorageConfigurationValidator.java`
+  - `backend/src/main/resources/application.yml`
+- Auth:
+  - `backend/src/main/java/com/eventcapture/backend/auth/AuthController.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/AuthService.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/HostSessionAuthenticationService.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/FrontendRedirectPolicy.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/StateAwareAuthorizationRequestRepository.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/OAuth2LoginSuccessHandler.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/OAuth2LoginFailureHandler.java`
+  - `backend/src/main/java/com/eventcapture/backend/auth/AuthConfigurationValidator.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/AbuseProtectionService.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/ClientIpResolver.java`
+  - `backend/src/main/java/com/eventcapture/backend/common/security/TurnstileChallengeVerifier.java`
+- Events:
+  - `backend/src/main/java/com/eventcapture/backend/event/Event.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/EventService.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenCipher.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenReleaseBPreflightService.java`
+  - `backend/src/main/java/com/eventcapture/backend/event/ShareTokenDatabaseKeyringValidator.java`
+  - `backend/src/main/java/com/eventcapture/backend/host/HostController.java`
+- Host event counts:
+  - `backend/src/main/java/com/eventcapture/backend/stats/EventStatsService.java`
+  - `backend/src/main/java/com/eventcapture/backend/stats/EventStatsResponse.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/EventPhotoCounts.java`
+  - `backend/src/main/java/com/eventcapture/backend/guest/EventGuestCounts.java`
+- Public guest flow:
+  - `backend/src/main/java/com/eventcapture/backend/guest/PublicEventController.java`
+  - `backend/src/main/java/com/eventcapture/backend/guest/GuestSessionService.java`
+- Uploads and gallery:
+  - `backend/src/main/java/com/eventcapture/backend/media/UploadService.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/MediaInspectionService.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/MediaVariantProcessor.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/JavaMediaVariantProcessor.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/LibvipsMediaVariantProcessor.java`
+  - `backend/src/main/java/com/eventcapture/backend/gallery/GalleryService.java`
+  - `backend/src/main/java/com/eventcapture/backend/gallery/GalleryEventBroker.java`
+  - `backend/src/main/java/com/eventcapture/backend/gallery/PublicAssetUrlBuilder.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/storage/LocalStorageService.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/storage/ObjectStorageService.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/storage/R2ObjectStorageService.java`
+  - `backend/src/main/java/com/eventcapture/backend/infra/storage/StorageConfig.java`
+- Jobs and async processing:
+  - `backend/src/main/java/com/eventcapture/backend/jobs/`
+  - `backend/src/main/java/com/eventcapture/backend/jobs/JobQueueMonitor.java`
+  - `backend/src/main/java/com/eventcapture/backend/jobs/JobCrashCheckpoint.java`
+  - `backend/deploy/prometheus/event-capture-alerts.yml`
+  - `backend/src/main/java/com/eventcapture/backend/media/MediaProcessingService.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/NativeMediaCommandException.java`
+  - `backend/src/main/java/com/eventcapture/backend/media/TransientMediaProcessingException.java`
+  - `backend/src/main/java/com/eventcapture/backend/export/ExportArchiveService.java`
+- Persistence:
+  - `backend/src/main/resources/db/migration/V1__initial_schema.sql`
+  - `backend/src/main/resources/db/migration/V2__upload_media_integrity.sql`
+  - `backend/src/main/resources/db/migration/V3__widen_multipart_upload_id.sql`
+  - `backend/src/main/resources/db/migration/V4__phase3_release_a.sql`
+  - `backend/src/main/resources/db/migration/V5__transactional_outbox.sql`
+  - `backend/src/main/resources/db/migration/V6__phase3_release_b.sql`
+  - `backend/src/main/resources/db/migration/V7__phase5_authentication.sql`
+  - `backend/src/main/resources/db/migration/V8__phase6_privacy.sql`
+- Tests:
+  - `backend/src/test/java/com/eventcapture/backend/integration/BackendIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/DistributedRuntimeIntegrationTest.java`
+  - `backend/src/phase4ProcessTest/java/com/eventcapture/backend/integration/Phase4ProcessRecoveryIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/WorkerRoleIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/LocalRuntimeIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/RuntimeConfigurationIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/LiveR2SmokeIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/S3CompatibleStorageIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3MigrationIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3ReleaseBMigrationH2Test.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/Phase3ReleaseBMigrationPostgresIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/gallery/GalleryEventBrokerTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/UploadServiceTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/UploadServicePhase2Test.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/MediaInspectionServiceTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/integration/ModerationConcurrencyIntegrationTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/LibvipsMediaVariantProcessorTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/media/NativeSourceImageDecoderTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/gallery/PublicAssetUrlBuilderTest.java`
+  - `backend/src/test/java/com/eventcapture/backend/infra/storage/R2ObjectStorageServiceTest.java`
+  - `backend/src/test/resources/application-test.yml`
+
+## Implemented API Surface
+
+### Auth
+
+- `POST /api/v1/auth/magic-link/request`
+- `GET /api/v1/auth/magic-link/consume`
+- `GET /api/v1/auth/magic-link/complete`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/csrf`
+- `GET /api/v1/auth/csrf`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/oauth2/authorization/google`
+- `GET /login/oauth2/code/google`
+- Current contract notes:
+  - magic-link requests accept optional allowlisted `returnPath`; browser completion returns a token-free `303` success/failure redirect with `no-store` and `no-referrer`
+  - challenge-required `403` responses expose only provider, site key, and action; abuse `429` responses include `Retry-After` and `retryAfterSeconds`
+  - Google OAuth remains absent unless client ID, client secret, and redirect URI form a complete configuration
+
+### Host
+
+- `GET /api/v1/host/events`
+- `POST /api/v1/host/events`
+- `GET /api/v1/host/events/stats`
+- `GET /api/v1/host/events/{eventId}`
+- `PATCH /api/v1/host/events/{eventId}`
+- `GET /api/v1/host/events/{eventId}/stats`
+- `GET /api/v1/host/events/{eventId}/photos`
+- `POST /api/v1/host/events/{eventId}/photos/{photoId}/hide`
+- `POST /api/v1/host/events/{eventId}/photos/{photoId}/unhide`
+- `POST /api/v1/host/events/{eventId}/photos/{photoId}/delete`
+- `POST /api/v1/host/events/{eventId}/exports`
+- `GET /api/v1/host/events/{eventId}/exports/{exportId}`
+- `GET /api/v1/host/events/{eventId}/exports/{exportId}/download`
+- Current contract notes:
+  - event responses expose `lifecycleState`, closure snapshot, applied retention days, `retentionExpiresAt`, `galleryEnabled`, and `galleryAvailable`; these fields are the host-settings privacy contract
+  - `EventStatsResponse` is `{eventId, photoCount, hiddenPhotoCount, guestCount, photosLast24hCount}`. Counts exclude `DELETED` photos and include hidden and still-processing ones, because those are photos the host still owns. `photosLast24hCount` is a rolling 24-hour window rather than a calendar day: events carry no timezone, so "today" is not answerable server-side and the UI says "Last 24h". `EventResponse` and `EventSummaryResponse` are deliberately unchanged, so the write paths carry no count queries.
+  - the batched `GET /api/v1/host/events/stats` returns one row per owned event, including an all-zero row for an event with no photos and no guests, so a client never has to tell "no photos" apart from "no data". The literal `/stats` segment takes routing precedence over the `/{eventId}` template.
+  - export creation returns RFC 9457 `410 Gone` after event retention expiry
+  - expired exports no longer expose `downloadUrl`
+  - export download returns `410 Gone` after `archiveExpiresAt`; successful ZIP responses use attachment, private/no-store, and `nosniff` headers
+
+### Public
+
+- `GET /api/v1/public/events/{slug}/{shareToken}`
+- `GET /api/v1/public/events/{slug}/{shareToken}/guest-session`
+- `POST /api/v1/public/events/{slug}/{shareToken}/guest-session`
+- `GET /api/v1/public/events/{slug}/{shareToken}/photos`
+- `GET /api/v1/public/events/{slug}/{shareToken}/stream`
+- `POST /api/v1/public/events/{slug}/{shareToken}/uploads/init`
+- `POST /api/v1/public/events/{slug}/{shareToken}/uploads/{uploadId}/parts`
+- `PUT /api/v1/public/events/{slug}/{shareToken}/uploads/{uploadId}/binary`
+- `PUT /api/v1/public/events/{slug}/{shareToken}/uploads/{uploadId}/parts/{partNumber}/binary`
+- `POST /api/v1/public/events/{slug}/{shareToken}/uploads/{uploadId}/complete`
+- `POST /api/v1/public/events/{slug}/{shareToken}/uploads/{uploadId}/finalize`
+- `GET /api/v1/public/assets/{publicToken}`
+- Current contract notes:
+  - the public event payload exposes `scheduledUploadOpenAt` alongside `scheduledUploadCloseAt`, so the guest page can say *when* uploads open instead of only that they are shut. It deliberately does not expose `uploadsClosedAt`; a guest UI must not report a still-future scheduled close as the moment uploads ended.
+  - `GET .../guest-session` resumes from the `event_capture_guest` cookie alone and returns the same `GuestSessionResponse` shape. It is read-only: it neither extends the session nor reissues the cookie, and `POST` remains the only mutating path. An absent, unknown, foreign or expired cookie answers `204 No Content`, not `401` - having no session is the normal first-visit state, not an error.
+  - `uploads/init` accepts optional `checksumSha256` (64 hexadecimal characters) and returns `requiredHeaders` for single-part direct upload flows.
+  - multipart part numbers are limited to the calculated part count; completion requires the exact contiguous part set and is idempotent.
+  - `uploads/{uploadId}/parts` returns `requiredHeaders` for multipart part uploads.
+  - `uploads/{uploadId}/finalize` returns `202 Accepted` with `processingStatus=UPLOADED` before worker completion.
+  - backend `PUT` binary routes are used only when `APP_STORAGE_PROVIDER=local`.
 
 ## Local Commands
 
@@ -210,9 +369,20 @@
 - Whenever `AGENTS.md` or any file under `.agents/` changes, update its physical mirror in the same change and verify that the canonical and mirrored files are identical.
 - Do not place machine-local secrets in either guidance tree. Keep `.env` untracked and use `env.example` for documented configuration.
 
+## Container Images
+
+- Both images are Alpine-based and both run `apk upgrade` at build time. That upgrade is the mechanism that keeps them patched: a base image is only rebuilt when its upstream cuts a release, so between releases it accumulates Alpine package CVEs that have already been fixed. Rebuilding is what clears them.
+- The frontend's `apk upgrade` **must** keep `--ignore nginx`. nginx comes from nginx.org's own apk repository and the official image drops that repository once nginx is installed, so a bare `apk upgrade` resolves `nginx` against Alpine's community repository and silently replaces the package. Alpine's build serves vhosts from `/etc/nginx/http.d`, so `/etc/nginx/conf.d` stops existing, the entrypoint's envsubst step fails with "conf.d is not writable", and nginx exits looking for a pid file at Alpine's path.
+- The frontend uses the `-slim` nginx variant. The full `nginx:alpine` image ships the optional dynamic modules (image-filter, xslt, njs), which pull in libpng, libgd, libXpm, libtiff, libxml2 and libxslt. `nginx.conf.template` uses only core directives, so those modules are pure scan surface. Adding a directive that needs one means moving off `-slim`.
+- The backend is Alpine specifically because of libvips packaging. Debian and Ubuntu ship one monolithic `libvips42` whose `Depends` pull in ImageMagick, HDF5, OpenEXR, poppler, OpenSlide and cfitsio; on Ubuntu 22.04 that was ~290 scanner findings with no fix available, since those packages live in `universe` and get no security updates. Ubuntu 24.04 and Debian trixie were both checked and have the identical dependency chain. Alpine builds libvips with loadable modules, so `vips-tools` (core plus JPEG/PNG/WEBP) and `vips-heif` install exactly what the app calls and nothing else.
+- `vips-magick`, `vips-poppler` and `vips-jxl` are deliberately not installed. Adding one re-imports the dependency chain the base exists to avoid.
+- `backend/Dockerfile.dev` installs the same four packages on purpose. The media pipeline shells out to these exact binaries, so a divergence would let a media bug reproduce in only one of dev and production.
+- The runtime image runs on the musl JVM (`eclipse-temurin:21-jre-alpine-*`). Everything on the application classpath is pure Java, and `vips`, `heif-convert` and `dwebp` are separate processes, so libc is not part of the media contract.
+
 ## Environment Notes
 
 - Local and dev builds now target a Java 21 toolchain directly, and the runtime images also remain on Java 21.
+- `backend/build.gradle` carries an `ext` block of security floors on top of the Spring Boot BOM: jackson-bom, netty, postgresql, tomcat, log4j2 and commons-lang3. Each entry exists because the BOM still pins that library below a version a published advisory requires, so removing one silently reintroduces a CVE. Re-check them when Spring Boot is upgraded and drop an entry only once the BOM's own pin has caught up or passed it.
 - Default runtime DB is H2 for local startup unless `APP_DATASOURCE_*` overrides are set.
 - Integration tests use PostgreSQL and Redis Testcontainers via dynamic Spring properties, with Redis-backed Spring Session enabled in the test profile.
 - Storage provider defaults to `local`.
@@ -262,6 +432,8 @@
 - Preserve the completed Phase 1 through Phase 5 runtime, security, resilience, auth, and abuse gates; keep the full backend, OpenAPI, and Phase 4 process checks passing after every backend phase.
 - Queued work, in the order it is most likely to be picked up:
   - **Add an event cover contract to the backend.** `Event` has no cover field, so `CreateEventRequest`/`UpdateEventRequest`/`EventResponse`/`EventSummaryResponse`/`PublicEventResponse` carry nothing to render, and both the host event cards and the guest join hero fall back to a deterministic decorative wash. Decide first whether a cover is a host-uploaded image (which needs an upload intent, a variant kind, storage keys, and the same hide/delete/expiry revocation rules as guest photos) or a chosen theme/palette token (a single enum column, no storage, no revocation surface). The theme route is far cheaper and covers the actual product need; only take the image route if hosts must supply their own photo.
+  - **Remove the Google Fonts CDN dependency.** `frontend/src/styles.scss` opens with an `@import url('https://fonts.googleapis.com/...')` for Newsreader, Hanken Grotesk and Space Mono. That contradicts the self-contained claim the QR renderer already honours, breaks the app's typography offline and on locked-down networks, leaks a request to a third party on every page load, and blocks adding a strict `Content-Security-Policy` to `frontend/nginx.conf.template`. Self-host the woff2 subsets under `frontend/public/` and declare `@font-face` locally.
+  - **Fix the banner's doubled padding.** `banner.component.ts` has the same bare-selector defect the badge dot had: `div { padding: var(--space-3) var(--space-4); border-radius: ... }` is rewritten to `div[_ngcontent-x]` and so also matches the nested `.content` div, insetting the banner text by a second full pad. Scope it to `:host > div`. This is the only remaining instance - the shared components were audited for the pattern, and `challenge-dialog`'s two `<p>` are siblings rather than nested, so its bare `p` rule is intentional.
   - **Make the top-left wordmark a real home link.** `wordmark.component.ts` renders a bare `<span>OurRoll</span>` with no anchor, no route, and no logo mark, and it sits in the top bar of every host page plus the guest header. There is no affordance to get back: the host event-detail and moderation pages rely entirely on the small breadcrumb, and event-settings only has a back-link to its own event. Give the wordmark an optional `routerLink` (host pages to `/host/events`; the guest header should stay inert, since a guest has nowhere to navigate to) with focus-visible styling and a real hit area, and consider pairing the text with an actual logo mark.
   - The `anyComponentStyle` budget question is **resolved**: the guest page was split into `guest-join`, `guest-upload-sheet` and `guest-photo-viewer` under `features/guest/components/`, and the budget was raised to `6 kB` warning / `10 kB` error. `event-detail.component.scss` (5.29 kB) is the only remaining warning and is deliberately left as the watch line. No further action is queued here.
   - **`npm run e2e` does not work on Windows.** The `e2e:backend` script is `cd ../backend && ./gradlew bootJar -q`, which cmd.exe cannot run, so the command fails before Playwright starts. Run `./gradlew bootJar` from a POSIX shell and then `npx playwright test`, or make the script cross-platform.

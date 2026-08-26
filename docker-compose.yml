@@ -55,7 +55,8 @@ x-backend-env: &backend-env
   APP_SHARE_TOKEN_BACKFILL_ENABLED: "false"
   APP_SHARE_TOKEN_RELEASE_B_PREFLIGHT_ENABLED: "false"
 
-  # The image installs libvips-tools, libheif-examples and webp for this processor.
+  # The image installs Alpine's vips-tools, vips-heif, libheif-tools and libwebp-tools for this
+  # processor, which is what supplies `vips`, `heif-convert` and `dwebp`.
   APP_MEDIA_PROCESSOR: libvips
 
   APP_STORAGE_PROVIDER: ${APP_STORAGE_PROVIDER:-r2}

@@ -92,7 +92,7 @@
 - `PROCESS_UPLOAD` distinguishes permanent invalid/corrupt media from transient storage, native-command, and dependency failures. Transient failures use bounded exponential retries and become terminal/DLQ-visible only after exhaustion.
 - Upload worker media inspection verifies JPEG, PNG, WEBP, HEIC, and HEIF signatures against the declared MIME type, rejects truncated/spoofed content, validates encoded/decoded dimensions and pixel limits, and normalizes JPEG EXIF orientation before publishing.
 - Native media commands have a 60-second timeout and bounded diagnostic output.
-- The media variant pipeline is selected through `APP_MEDIA_PROCESSOR=java|libvips`: Java remains the portable local/test fallback, while the root `docker-compose.yml` selects libvips for bounded auto-rotating, metadata-stripping re-encoding. Production images include `libvips-tools`, HEIF, and WEBP helpers.
+- The media variant pipeline is selected through `APP_MEDIA_PROCESSOR=java|libvips`: Java remains the portable local/test fallback, while the root `docker-compose.yml` selects libvips for bounded auto-rotating, metadata-stripping re-encoding. Production images supply `vips`, `heif-convert` and `dwebp` from Alpine's `vips-tools`, `vips-heif`, `libheif-tools` and `libwebp-tools`.
 - Export jobs are now executed asynchronously and can return a signed or local download URL once `READY`. Duplicate builds take a pessimistic export-job lock, use a deterministic archive key, and remove that key on terminal failure even if its database path did not commit.
 - Phase 6 moderation uses one pessimistic photo lock across moderation, media processing, and deleted-photo purge. Only `VISIBLE -> HIDDEN`, `HIDDEN -> VISIBLE`, and `VISIBLE|HIDDEN -> DELETED` change state; repeated actions are no-op `204` responses, deletion is terminal, and the first `deletedAt` remains immutable.
 - Public asset delivery applies `no-store`, `no-cache`, zero-age, `Pragma`, `Expires`, and `nosniff` headers through an API-role filter for every GET/HEAD success or error. Hidden, deleted, non-ready, gallery-disabled, retention-expired, purged, and unknown assets remain indistinguishable `404` responses.
@@ -369,9 +369,20 @@
 - Whenever `AGENTS.md` or any file under `.agents/` changes, update its physical mirror in the same change and verify that the canonical and mirrored files are identical.
 - Do not place machine-local secrets in either guidance tree. Keep `.env` untracked and use `env.example` for documented configuration.
 
+## Container Images
+
+- Both images are Alpine-based and both run `apk upgrade` at build time. That upgrade is the mechanism that keeps them patched: a base image is only rebuilt when its upstream cuts a release, so between releases it accumulates Alpine package CVEs that have already been fixed. Rebuilding is what clears them.
+- The frontend's `apk upgrade` **must** keep `--ignore nginx`. nginx comes from nginx.org's own apk repository and the official image drops that repository once nginx is installed, so a bare `apk upgrade` resolves `nginx` against Alpine's community repository and silently replaces the package. Alpine's build serves vhosts from `/etc/nginx/http.d`, so `/etc/nginx/conf.d` stops existing, the entrypoint's envsubst step fails with "conf.d is not writable", and nginx exits looking for a pid file at Alpine's path.
+- The frontend uses the `-slim` nginx variant. The full `nginx:alpine` image ships the optional dynamic modules (image-filter, xslt, njs), which pull in libpng, libgd, libXpm, libtiff, libxml2 and libxslt. `nginx.conf.template` uses only core directives, so those modules are pure scan surface. Adding a directive that needs one means moving off `-slim`.
+- The backend is Alpine specifically because of libvips packaging. Debian and Ubuntu ship one monolithic `libvips42` whose `Depends` pull in ImageMagick, HDF5, OpenEXR, poppler, OpenSlide and cfitsio; on Ubuntu 22.04 that was ~290 scanner findings with no fix available, since those packages live in `universe` and get no security updates. Ubuntu 24.04 and Debian trixie were both checked and have the identical dependency chain. Alpine builds libvips with loadable modules, so `vips-tools` (core plus JPEG/PNG/WEBP) and `vips-heif` install exactly what the app calls and nothing else.
+- `vips-magick`, `vips-poppler` and `vips-jxl` are deliberately not installed. Adding one re-imports the dependency chain the base exists to avoid.
+- `backend/Dockerfile.dev` installs the same four packages on purpose. The media pipeline shells out to these exact binaries, so a divergence would let a media bug reproduce in only one of dev and production.
+- The runtime image runs on the musl JVM (`eclipse-temurin:21-jre-alpine-*`). Everything on the application classpath is pure Java, and `vips`, `heif-convert` and `dwebp` are separate processes, so libc is not part of the media contract.
+
 ## Environment Notes
 
 - Local and dev builds now target a Java 21 toolchain directly, and the runtime images also remain on Java 21.
+- `backend/build.gradle` carries an `ext` block of security floors on top of the Spring Boot BOM: jackson-bom, netty, postgresql, tomcat, log4j2 and commons-lang3. Each entry exists because the BOM still pins that library below a version a published advisory requires, so removing one silently reintroduces a CVE. Re-check them when Spring Boot is upgraded and drop an entry only once the BOM's own pin has caught up or passed it.
 - Default runtime DB is H2 for local startup unless `APP_DATASOURCE_*` overrides are set.
 - Integration tests use PostgreSQL and Redis Testcontainers via dynamic Spring properties, with Redis-backed Spring Session enabled in the test profile.
 - Storage provider defaults to `local`.
