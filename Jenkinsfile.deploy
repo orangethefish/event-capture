@@ -35,6 +35,19 @@ pipeline {
 
 	environment {
 		BACKEND_MIGRATIONS = 'backend/src/main/resources/db/migration'
+
+		// Do not rely on Jenkins injecting build parameters into the shell environment.
+		// This pipeline failed with `ROOT_COMMIT: parameter not set` under `set -eu` even
+		// though the Validate stage had already accepted params.ROOT_COMMIT, so a populated
+		// `params.X` is not a guarantee that `$X` exists inside an sh step. Bind every
+		// parameter the shell reads into env explicitly. VAULT_ENABLED/VAULT_ENV need it too:
+		// the root pipeline does not pass them, so the Transfer stage was reading defaults
+		// that were never exported either. The sh blocks stay single-quoted, so no parameter
+		// value is ever interpolated into a shell string.
+		RELEASE_TAG = "${params.RELEASE_TAG}"
+		ROOT_COMMIT = "${params.ROOT_COMMIT}"
+		VAULT_ENABLED = "${params.VAULT_ENABLED}"
+		VAULT_ENV = "${params.VAULT_ENV}"
 	}
 
 	stages {
