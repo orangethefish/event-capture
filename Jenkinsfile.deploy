@@ -159,6 +159,18 @@ pipeline {
 							TARGET="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
 							REL="/srv/event-capture/releases/$RELEASE_TAG"
 
+							# Fail fast, and legibly, when the pinned known_hosts credential is empty,
+							# malformed, or simply has no entry for DEPLOY_SSH_HOST. Without this the first
+							# symptom is ssh exit 255 "No ED25519 host key is known", which reads like a VM
+							# or network problem rather than a credential problem. Host keys are public data,
+							# so printing the size and fingerprints here leaks nothing. Note that
+							# withCredentials(file:) writes the credential to a path and puts the PATH in
+							# $KNOWN_HOSTS - a Secret text credential of the same ID would not work here.
+							echo "known_hosts: $(wc -c < "$KNOWN_HOSTS") bytes"
+							ssh-keygen -lf "$KNOWN_HOSTS" || echo "WARNING: no parseable host keys in prod-known-hosts"
+							ssh-keygen -F "$DEPLOY_SSH_HOST" -f "$KNOWN_HOSTS" >/dev/null 2>&1 \
+								|| { echo "prod-known-hosts contains no entry for $DEPLOY_SSH_HOST" >&2; exit 1; }
+
 							ssh -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" "$TARGET" "mkdir -p '$REL'"
 							scp -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -r "bundle/$RELEASE_TAG/." "$TARGET:$REL/"
 							# deploy.sh takes only the validated release tag as a positional argument.
