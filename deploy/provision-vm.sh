@@ -26,6 +26,23 @@ die() { printf '[provision] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
 
+# --- Host packages the deploy scripts require --------------------------------------------------
+# deploy/lib.sh needs docker, curl, awk, grep, df and date; deploy/vault.sh additionally needs jq.
+# jq is the one routinely absent from a minimal Debian/Ubuntu image, and its absence does not
+# surface until the first Vault-enabled deploy dies on the VM with "required command not found:
+# jq" - after Jenkins has already transferred the release bundle. Install it up front instead.
+MISSING_PKGS=""
+command -v jq   >/dev/null 2>&1 || MISSING_PKGS="$MISSING_PKGS jq"
+command -v curl >/dev/null 2>&1 || MISSING_PKGS="$MISSING_PKGS curl"
+if [ -n "$MISSING_PKGS" ]; then
+	command -v apt-get >/dev/null 2>&1 \
+		|| die "missing required commands:$MISSING_PKGS (no apt-get here; install them manually)"
+	log "installing missing host packages:$MISSING_PKGS"
+	# Deliberately unquoted: MISSING_PKGS is a package list built from literals above.
+	DEBIAN_FRONTEND=noninteractive apt-get update -qq
+	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $MISSING_PKGS
+fi
+
 # --- Docker Engine + Compose v2 --------------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
 	if [ "${INSTALL_DOCKER:-1}" = "1" ] && command -v apt-get >/dev/null 2>&1; then

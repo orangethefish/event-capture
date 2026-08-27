@@ -229,7 +229,8 @@ pipeline {
 					string(name: 'RELEASE_TAG', value: env.TAG_NAME),
 					string(name: 'ROOT_COMMIT', value: env.ROOT_COMMIT),
 					string(name: 'BACKEND_IMAGE_DIGEST', value: env.BACKEND_DIGEST),
-					string(name: 'FRONTEND_IMAGE_DIGEST', value: env.FRONTEND_DIGEST)
+					string(name: 'FRONTEND_IMAGE_DIGEST', value: env.FRONTEND_DIGEST),
+					string(name: 'EVENT_CAPTURE_VAULT_ADDR', value: env.VAULT_ADDR)
 				]
 			}
 		}
