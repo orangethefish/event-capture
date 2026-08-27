@@ -16,7 +16,7 @@
 # Vault KV v2 paths are fixed to secret/data/event-capture/<environment>/{database,redis,
 # storage,smtp,auth,app}. The deployed AppRole must have read access only to its own environment.
 
-VAULT_AUTH_FILE="${VAULT_AUTH_FILE:-/opt/event-capture/shared/vault-auth}"
+VAULT_AUTH_FILE="${VAULT_AUTH_FILE:-/srv/event-capture/shared/vault-auth}"
 VAULT_SECRET_PATH_PREFIX="${VAULT_SECRET_PATH_PREFIX:-secret/data/event-capture}"
 VAULT_ADDR=""
 VAULT_CACERT=""
