@@ -11,7 +11,7 @@
 #   - verifies/installs Docker Engine + Compose v2
 #   - creates a non-root 'deploy' user in the docker group
 #   - logs Docker in to Harbor with the PULL-ONLY VM robot account (as the deploy user)
-#   - creates /opt/event-capture/{releases,shared,backups}
+#   - creates /srv/event-capture/{releases,shared,backups}
 #   - writes shared/production.env (0600) from a template if absent (never overwrites secrets)
 #
 # It does NOT install or modify the host nginx / Cloudflare configuration. Those stay VM-managed

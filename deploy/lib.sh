@@ -4,7 +4,7 @@
 # Sourced by deploy.sh, preflight.sh, backup.sh, health.sh and rollback.sh. This library only
 # DEFINES functions and derives paths; it does not `set -e` (the entry scripts do) so it can also
 # be sourced by the rollback-guard unit tests. No secrets live here or in any transferred file;
-# secrets live only in $SHARED_ENV (/opt/event-capture/shared/production.env, 0600, VM-managed).
+# secrets live only in $SHARED_ENV (/srv/event-capture/shared/production.env, 0600, VM-managed).
 #
 # On the VM the release bundle is laid out as:
 #   $OPT_ROOT/shared/production.env                 secrets (VM-managed or Vault-generated)
@@ -17,7 +17,7 @@
 #   $OPT_ROOT/current -> releases/vX.Y.Z             last SUCCESSFUL release
 #
 # Environment overrides (used by the smoke rehearsal to run against a temp root + build images):
-#   EVENT_CAPTURE_ROOT              default /opt/event-capture
+#   EVENT_CAPTURE_ROOT              default /srv/event-capture
 #   EVENT_CAPTURE_SHARED_ENV       default $OPT_ROOT/shared/production.env
 #   EVENT_CAPTURE_COMPOSE_OVERRIDE default docker-compose.vm.yml (smoke uses docker-compose.build.yml)
 #   EVENT_CAPTURE_BUILD_IMAGES     default 0 (smoke sets 1 to build instead of pull)

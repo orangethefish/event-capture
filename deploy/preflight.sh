@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Standalone preflight: validate compose config, free disk, existing dependency health and bundle
 # completeness for a release, without changing any container.
-#   sh /opt/event-capture/releases/vX.Y.Z/deploy/preflight.sh vX.Y.Z
+#   sh /srv/event-capture/releases/vX.Y.Z/deploy/preflight.sh vX.Y.Z
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

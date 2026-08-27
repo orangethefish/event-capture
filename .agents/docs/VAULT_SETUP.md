@@ -164,14 +164,14 @@ vault kv put secret/event-capture/production/app \
 Create the Vault auth file on the deployment VM:
 
 ```bash
-sudo mkdir -p /opt/event-capture/shared
-sudo tee /opt/event-capture/shared/vault-auth > /dev/null <<'EOF'
+sudo mkdir -p /srv/event-capture/shared
+sudo tee /srv/event-capture/shared/vault-auth > /dev/null <<'EOF'
 VAULT_ADDR=https://vault.example.com:8200
 VAULT_ROLE_ID=<role-id-from-step-4>
 VAULT_SECRET_ID=<secret-id-from-step-4>
 EOF
-sudo chmod 0600 /opt/event-capture/shared/vault-auth
-sudo chown deploy:deploy /opt/event-capture/shared/vault-auth
+sudo chmod 0600 /srv/event-capture/shared/vault-auth
+sudo chown deploy:deploy /srv/event-capture/shared/vault-auth
 ```
 
 ## 7. Enable Vault Integration
@@ -198,7 +198,7 @@ from Vault before starting services:
 [deploy] authenticating with Vault at https://vault.example.com:8200
 [deploy] vault login successful
 [deploy] fetching secrets for environment: production
-[deploy] secrets written to /opt/event-capture/shared/production.env (47 lines)
+[deploy] secrets written to /srv/event-capture/shared/production.env (47 lines)
 ```
 
 ### Manual refresh
@@ -206,11 +206,11 @@ from Vault before starting services:
 After rotating a secret in Vault, refresh without a full deploy:
 
 ```bash
-sh /opt/event-capture/current/deploy/vault-refresh.sh production
+sh /srv/event-capture/current/deploy/vault-refresh.sh production
 
 # Then restart affected services
-cd /opt/event-capture/current
-docker compose --env-file /opt/event-capture/shared/production.env \
+cd /srv/event-capture/current
+docker compose --env-file /srv/event-capture/shared/production.env \
                --env-file release.env \
                -f docker-compose.yml -f docker-compose.vm.yml \
                restart backend-api backend-worker
@@ -228,8 +228,8 @@ docker compose --env-file /opt/event-capture/shared/production.env \
 
 2. Refresh on VM:
    ```bash
-   ssh deploy@vm 'sh /opt/event-capture/current/deploy/vault-refresh.sh'
-   ssh deploy@vm 'cd /opt/event-capture/current && docker compose ... restart backend-api'
+   ssh deploy@vm 'sh /srv/event-capture/current/deploy/vault-refresh.sh'
+   ssh deploy@vm 'cd /srv/event-capture/current && docker compose ... restart backend-api'
    ```
 
 ### Rotating the share token keyring
@@ -268,7 +268,7 @@ If the Secret ID is compromised:
 2. Update on VM:
    ```bash
    sudo sed -i "s/VAULT_SECRET_ID=.*/VAULT_SECRET_ID=<new-secret-id>/" \
-       /opt/event-capture/shared/vault-auth
+       /srv/event-capture/shared/vault-auth
    ```
 
 3. (Optional) Destroy the old accessor:
@@ -333,7 +333,7 @@ curl -fsSv ...
 If Vault is unavailable:
 
 1. Set `EVENT_CAPTURE_VAULT_ENABLED=0`
-2. Manually create/update `/opt/event-capture/shared/production.env`
+2. Manually create/update `/srv/event-capture/shared/production.env`
 3. Deploy normally
 
 The format matches `env.example`.

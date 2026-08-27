@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Standalone health gate for a release: API + worker container health, plus readiness through the
 # frontend proxy at http://127.0.0.1:${PUBLIC_PORT}/actuator/health/readiness.
-#   sh /opt/event-capture/releases/vX.Y.Z/deploy/health.sh vX.Y.Z
+#   sh /srv/event-capture/releases/vX.Y.Z/deploy/health.sh vX.Y.Z
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

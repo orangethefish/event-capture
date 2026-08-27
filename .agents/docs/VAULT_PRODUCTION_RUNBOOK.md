@@ -1,6 +1,6 @@
 # Event Capture Vault Production Runbook
 
-Event Capture reads Vault **only from the deployment VM**. Jenkins transfers a digest-pinned release over SSH; the VM authenticates to Vault, renders `/opt/event-capture/shared/production.env` atomically, and starts Compose. Jenkins must not receive application secrets, Vault tokens, AppRole Role IDs, or Secret IDs.
+Event Capture reads Vault **only from the deployment VM**. Jenkins transfers a digest-pinned release over SSH; the VM authenticates to Vault, renders `/srv/event-capture/shared/production.env` atomically, and starts Compose. Jenkins must not receive application secrets, Vault tokens, AppRole Role IDs, or Secret IDs.
 
 ## Verified current state
 
@@ -78,11 +78,11 @@ WRAPPED_SECRET_ID=$(vault write -wrap-ttl=10m -f -field=wrapping_token \
   auth/approle/role/event-capture-production-vm/secret-id)
 ```
 
-On the VM console, unwrap the Secret ID and store it in `/opt/event-capture/shared/vault-auth`, owned by `deploy:deploy` and mode `0600`. Copy the Vault origin certificate as a readable CA file. The production auth file has exactly these keys:
+On the VM console, unwrap the Secret ID and store it in `/srv/event-capture/shared/vault-auth`, owned by `deploy:deploy` and mode `0600`. Copy the Vault origin certificate as a readable CA file. The production auth file has exactly these keys:
 
 ```
 VAULT_ADDR=https://vault.orangethefish.id.vn
-VAULT_CACERT=/opt/event-capture/shared/vault-ca.pem
+VAULT_CACERT=/srv/event-capture/shared/vault-ca.pem
 VAULT_CONNECT_TO=vault.orangethefish.id.vn:443:127.0.0.1:8200
 VAULT_ROLE_ID=<role ID>
 VAULT_SECRET_ID=<unwrapped Secret ID>
@@ -95,10 +95,10 @@ After all six secret paths exist, validate as the deploy user:
 ```bash
 sudo -u deploy sh -c '
   set -eu
-  . /opt/event-capture/current/deploy/lib.sh
-  . /opt/event-capture/current/deploy/vault.sh
+  . /srv/event-capture/current/deploy/lib.sh
+  . /srv/event-capture/current/deploy/vault.sh
   vault_fetch_secrets production
-  test "$(stat -c %a /opt/event-capture/shared/production.env)" = 600
+  test "$(stat -c %a /srv/event-capture/shared/production.env)" = 600
 '
 ```
 

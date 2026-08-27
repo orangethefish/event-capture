@@ -11,8 +11,8 @@
 # Those are generated per release into release.env by the deploy job and layered on top of the
 # VM's shared/production.env secrets:
 #
-#   docker compose --env-file /opt/event-capture/shared/production.env \
-#                  --env-file /opt/event-capture/releases/vX.Y.Z/release.env \
+#   docker compose --env-file /srv/event-capture/shared/production.env \
+#                  --env-file /srv/event-capture/releases/vX.Y.Z/release.env \
 #                  -f docker-compose.yml -f docker-compose.vm.yml up -d
 #
 # For a local build workflow (no Harbor), use the build override, which restores build: contexts

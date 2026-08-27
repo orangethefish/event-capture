@@ -6,7 +6,7 @@
 # atomically, and never prints a Vault response body (which can contain a secret or token).
 #
 # Required VM-local file, mode 0600 and owned by the deploy user:
-#   /opt/event-capture/shared/vault-auth
+#   /srv/event-capture/shared/vault-auth
 #   VAULT_ADDR=https://vault.orangethefish.id.vn
 #   VAULT_CONNECT_TO=vault.orangethefish.id.vn:443:127.0.0.1:8200  # optional VM-local route
 #   VAULT_ROLE_ID=<AppRole role ID>

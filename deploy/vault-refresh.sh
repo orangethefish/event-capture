@@ -3,7 +3,7 @@
 # a full deployment, e.g. after rotating a credential in Vault.
 #
 # Usage:
-#   sh /opt/event-capture/releases/vX.Y.Z/deploy/vault-refresh.sh [environment]
+#   sh /srv/event-capture/releases/vX.Y.Z/deploy/vault-refresh.sh [environment]
 #
 # After running, restart services to pick up the new secrets:
 #   docker compose ... restart backend-api backend-worker

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Controlled production update for one release. Invoked by the Jenkins deploy job over SSH:
-#   sh /opt/event-capture/releases/vX.Y.Z/deploy/deploy.sh vX.Y.Z
+#   sh /srv/event-capture/releases/vX.Y.Z/deploy/deploy.sh vX.Y.Z
 #
 # Order: preflight -> start/verify postgres+redis (no refresh) -> pg backup -> pull the 3 pinned
 # images -> recreate api, worker, frontend in order -> health gate. On failure it hands off to the

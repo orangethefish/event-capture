@@ -76,7 +76,7 @@ Store secrets in Vault and let the deploy scripts fetch them automatically.
 See `VAULT_SETUP.md` for full configuration. Quick start:
 
 1. Set up Vault with AppRole auth and store secrets under `secret/data/event-capture/production/`
-2. Create `/opt/event-capture/shared/vault-auth` on the VM with `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`
+2. Create `/srv/event-capture/shared/vault-auth` on the VM with `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`
 3. Set `EVENT_CAPTURE_VAULT_ENABLED=1` in Jenkins or before running `deploy.sh`
 
 The deploy script generates `production.env` from Vault before starting services.
@@ -87,7 +87,7 @@ The deploy script generates `production.env` from Vault before starting services
 cp env.example .env
 ```
 
-Edit `.env` and copy to `/opt/event-capture/shared/production.env` on the VM (mode 0600).
+Edit `.env` and copy to `/srv/event-capture/shared/production.env` on the VM (mode 0600).
 
 ### Values most often set wrong (applies to both options)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Standalone compressed PostgreSQL backup for a release, retained in its release directory.
-#   sh /opt/event-capture/releases/vX.Y.Z/deploy/backup.sh vX.Y.Z
+#   sh /srv/event-capture/releases/vX.Y.Z/deploy/backup.sh vX.Y.Z
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
