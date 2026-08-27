@@ -8,7 +8,6 @@
 # Required VM-local file, mode 0600 and owned by the deploy user:
 #   /opt/event-capture/shared/vault-auth
 #   VAULT_ADDR=https://vault.orangethefish.id.vn
-#   VAULT_CACERT=/opt/event-capture/shared/vault-ca.pem   # omit only with a public CA chain
 #   VAULT_CONNECT_TO=vault.orangethefish.id.vn:443:127.0.0.1:8200  # optional VM-local route
 #   VAULT_ROLE_ID=<AppRole role ID>
 #   VAULT_SECRET_ID=<AppRole secret ID>
@@ -19,7 +18,6 @@
 VAULT_AUTH_FILE="${VAULT_AUTH_FILE:-/srv/event-capture/shared/vault-auth}"
 VAULT_SECRET_PATH_PREFIX="${VAULT_SECRET_PATH_PREFIX:-secret/data/event-capture}"
 VAULT_ADDR=""
-VAULT_CACERT=""
 VAULT_CONNECT_TO=""
 VAULT_ROLE_ID=""
 VAULT_SECRET_ID=""
@@ -47,7 +45,6 @@ vault_load_auth() {
   [ -r "$VAULT_AUTH_FILE" ] || die "vault auth file is not readable: $VAULT_AUTH_FILE"
 
   VAULT_ADDR=$(vault_auth_field VAULT_ADDR)
-  VAULT_CACERT=$(vault_auth_field VAULT_CACERT)
   VAULT_CONNECT_TO=$(vault_auth_field VAULT_CONNECT_TO)
   VAULT_ROLE_ID=$(vault_auth_field VAULT_ROLE_ID)
   VAULT_SECRET_ID=$(vault_auth_field VAULT_SECRET_ID)
@@ -58,9 +55,6 @@ vault_load_auth() {
     https://*) ;;
     *) die "VAULT_ADDR must be an HTTPS URL" ;;
   esac
-  if [ -n "$VAULT_CACERT" ]; then
-    [ -r "$VAULT_CACERT" ] || die "VAULT_CACERT is not readable: $VAULT_CACERT"
-  fi
   case "$VAULT_CONNECT_TO" in
     *[!A-Za-z0-9._:-]*) die "VAULT_CONNECT_TO has an invalid format" ;;
   esac
@@ -69,11 +63,6 @@ vault_load_auth() {
 vault_curl() {
   if [ -n "$VAULT_CONNECT_TO" ]; then
     set -- --connect-to "$VAULT_CONNECT_TO" "$@"
-  fi
-  if [ -n "$VAULT_CACERT" ]; then
-    curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 10 --cacert "$VAULT_CACERT" "$@"
-  else
-    curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 10 "$@"
   fi
 }
 
