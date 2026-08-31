@@ -64,6 +64,16 @@ vault_curl() {
   if [ -n "$VAULT_CONNECT_TO" ]; then
     set -- --connect-to "$VAULT_CONNECT_TO" "$@"
   fi
+  # This curl call is the whole point of the function. It was once the second half of an
+  # if/else on VAULT_CACERT, and removing the CA-cert branch deleted both invocations with it,
+  # leaving a function that rewrote "$@" and returned 0 having sent nothing - which surfaced as
+  # "Vault AppRole login returned no client token", blaming a response that never existed.
+  # Vault is fronted by a Cloudflare Tunnel, so the edge serves a publicly-trusted certificate
+  # and the default CA store is correct; do not reintroduce --cacert or --insecure here.
+  # --fail is load-bearing: without it curl exits 0 on an HTTP 403/400 and the caller parses
+  # Vault's error body as a missing token, turning a credential fault back into that same
+  # misleading message instead of "Vault AppRole login failed".
+  curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 10 "$@"
 }
 
 vault_temp_file() {
