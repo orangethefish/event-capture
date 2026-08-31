@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Unit tests for vault_curl() in deploy/vault.sh. Pure logic, no network and no real Vault.
+# Unit tests for the HTTP transport helpers in deploy/vault.sh. Pure logic, no network, no Vault.
 #   sh deploy/tests/vault-curl-test.sh
 #
 # This file exists because of a shipped regression: the commit that dropped VAULT_CACERT support
@@ -111,6 +111,31 @@ fi
 # An argument containing a space must arrive as ONE argv entry, not word-split into two.
 if has_arg '@/tmp/payload json'; then pass "preserves an argument containing a space"; else bad "preserves an argument containing a space"; fi
 
+
+# --- the logged endpoint must name the address actually dialled --------------------------------
+# VAULT_CONNECT_TO reroutes the TCP connection while the URL keeps its original hostname, so
+# logging VAULT_ADDR alone asserts an endpoint that may not be the one contacted. A stale
+# loopback route therefore read as "authenticating with Vault at https://vault..." immediately
+# followed by a connection failure to 127.0.0.1 - the log actively pointed away from the cause.
+VAULT_ADDR="https://vault.example"
+VAULT_CONNECT_TO=""
+desc=$(vault_endpoint_description)
+if [ "$desc" = "https://vault.example" ]; then
+  pass "endpoint description is the plain URL with no route override"
+else
+  bad "endpoint description is the plain URL with no route override (got '$desc')"
+fi
+
+VAULT_CONNECT_TO="vault.example:443:127.0.0.1:8200"
+desc=$(vault_endpoint_description)
+case "$desc" in
+  *"https://vault.example"*) pass "endpoint description keeps the Vault URL" ;;
+  *) bad "endpoint description keeps the Vault URL (got '$desc')" ;;
+esac
+case "$desc" in
+  *"127.0.0.1:8200"*) pass "endpoint description discloses the overridden route" ;;
+  *) bad "endpoint description discloses the overridden route (got '$desc')" ;;
+esac
 if [ "$fail" -eq 0 ]; then
   echo "ALL TESTS PASSED"; exit 0
 else

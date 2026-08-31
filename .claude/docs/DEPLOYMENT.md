@@ -73,7 +73,8 @@ keyring does not.
 ### Option A: HashiCorp Vault (recommended for production)
 
 Store secrets in Vault and let the deploy scripts fetch them automatically.
-See `VAULT_SETUP.md` for full configuration. Quick start:
+See `VAULT_PRODUCTION_RUNBOOK.md` for the required TLS, least-privilege AppRole, and Jenkins
+credential boundaries; `VAULT_SETUP.md` retains the field examples. Quick start:
 
 1. Set up Vault with AppRole auth and store secrets under `secret/data/event-capture/production/`
 2. Create `/srv/event-capture/shared/vault-auth` on the VM with `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`

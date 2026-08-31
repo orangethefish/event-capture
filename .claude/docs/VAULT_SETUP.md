@@ -3,6 +3,10 @@
 How to manage Event Capture secrets with HashiCorp Vault instead of manually editing
 `production.env` on the VM.
 
+> **Production use:** follow [VAULT_PRODUCTION_RUNBOOK.md](VAULT_PRODUCTION_RUNBOOK.md).
+> This original bootstrap guide is retained for its secret-field examples, but its generic
+> AppRole settings must not be used for the production VM.
+
 ## Overview
 
 The Vault integration:

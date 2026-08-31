@@ -160,6 +160,60 @@ migrations_changed() {
   return 0
 }
 
+# Registry host of an image reference, or empty for a bare Docker Hub name. Docker treats the
+# first path segment as a registry only when it looks like a host (contains a dot or a colon, or
+# is localhost), which is what keeps "library/postgres" from being read as a host named "library".
+registry_host_of() {
+  _first="${1%%/*}"
+  case "$1" in
+    */*) case "$_first" in
+           *.*|*:*|localhost) printf '%s' "$_first" ;;
+           *) printf '' ;;
+         esac ;;
+    *) printf '' ;;
+  esac
+}
+
+# Whether the invoking user's Docker credential store can authenticate to a registry. A
+# credential helper keeps the secret OUTSIDE config.json and leaves an empty auths entry behind,
+# so presence - not content - is what can be checked here without invoking the helper. This
+# answers "was docker login ever run for this host", which is the failure that actually occurs;
+# a revoked or expired robot token still surfaces at pull time.
+registry_credentials_present() {
+  _cfg="$1"; _host="$2"
+  [ -f "$_cfg" ] || return 1
+  grep -Fq "\"$_host\"" "$_cfg" && return 0
+  grep -Fq '"credsStore"' "$_cfg" && return 0
+  return 1
+}
+
+# Fail before any container work when the deploy user has no credentials for the release
+# registry. Image pulls happen on the VM, and Jenkins deliberately never transfers registry
+# credentials, so the pull-only Harbor robot must already be in this user's credential store.
+# Without this the deploy starts postgres and redis and takes a database backup before dying on
+# "no basic auth credentials" - a legible fault discovered at the least convenient moment.
+check_registry_credentials() {
+  _rd="$1"
+  # The smoke rehearsal builds or reuses local images and never pulls, so it has no registry to
+  # authenticate to. Gate on exactly the conditions fetch_app_images() uses to skip the pull.
+  [ "${EVENT_CAPTURE_SKIP_FETCH:-0}" = "1" ] && return 0
+  [ "${EVENT_CAPTURE_BUILD_IMAGES:-0}" = "1" ] && return 0
+  _image=$(awk -F= '$1 == "EVENT_CAPTURE_BACKEND_IMAGE" { sub(/^[^=]*=/, ""); print; exit }' \
+    "$_rd/release.env" 2>/dev/null || true)
+  [ -n "$_image" ] || return 0
+  _host=$(registry_host_of "$_image")
+  [ -n "$_host" ] || return 0
+  _cfg="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+  if registry_credentials_present "$_cfg" "$_host"; then
+    log "registry credentials present for $_host"
+  else
+    die "no Docker credentials for $_host as user $(id -un). Images are pulled on this VM with a
+  pull-only registry robot that Jenkins never transfers. Run, as this user:
+    docker login $_host --username '<robot user>' --password-stdin
+  then re-run the deploy. See .agents/docs/VAULT_PRODUCTION_RUNBOOK.md for the credential split."
+  fi
+}
+
 preflight_checks() {
   _rd="$1"
   require_cmd docker curl awk grep df date
@@ -174,6 +228,7 @@ preflight_checks() {
     [ -f "$_rd/$_f" ] || die "release bundle incomplete: missing $_rd/$_f"
   done
   [ -f "$_rd/release-manifest.json" ] || warn "release-manifest.json missing in $_rd"
+  check_registry_credentials "$_rd"
   _avail=$(df -Pm "$OPT_ROOT" | awk 'NR==2 {print $4}')
   [ "${_avail:-0}" -ge "$DISK_MIN_MB" ] \
     || die "insufficient free disk: ${_avail:-0}MB < ${DISK_MIN_MB}MB"

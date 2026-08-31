@@ -8,7 +8,8 @@
 # Required VM-local file, mode 0600 and owned by the deploy user:
 #   /srv/event-capture/shared/vault-auth
 #   VAULT_ADDR=https://vault.orangethefish.id.vn
-#   VAULT_CONNECT_TO=vault.orangethefish.id.vn:443:127.0.0.1:8200  # optional VM-local route
+#   VAULT_CONNECT_TO=<host:port:connect-host:connect-port>  # optional; NOT used with the
+#                                          # Cloudflare Tunnel topology - see VAULT_PRODUCTION_RUNBOOK.md
 #   VAULT_ROLE_ID=<AppRole role ID>
 #   VAULT_SECRET_ID=<AppRole secret ID>
 #
@@ -74,6 +75,19 @@ vault_curl() {
   # Vault's error body as a missing token, turning a credential fault back into that same
   # misleading message instead of "Vault AppRole login failed".
   curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 10 "$@"
+}
+
+# Describe the endpoint that is actually dialled. VAULT_CONNECT_TO silently reroutes the TCP
+# connection while the URL keeps its original hostname, so logging VAULT_ADDR on its own claims
+# an endpoint that may not be the one contacted. A stale loopback route read as "authenticating
+# with Vault at https://vault..." followed by a connection failure to 127.0.0.1, which pointed
+# debugging away from the actual cause. A host:port route is not a secret, so naming it is safe.
+vault_endpoint_description() {
+  if [ -n "$VAULT_CONNECT_TO" ]; then
+    printf '%s (routed to %s)' "$VAULT_ADDR" "$VAULT_CONNECT_TO"
+  else
+    printf '%s' "$VAULT_ADDR"
+  fi
 }
 
 vault_temp_file() {
@@ -159,7 +173,7 @@ vault_fetch_secrets() {
 
   require_cmd curl jq awk sed grep mktemp chmod mv rm
   vault_load_auth
-  log "authenticating with Vault at $VAULT_ADDR"
+  log "authenticating with Vault at $(vault_endpoint_description)"
   _token=$(vault_login)
   log "Vault login successful"
   log "fetching secrets for environment: $_env"
